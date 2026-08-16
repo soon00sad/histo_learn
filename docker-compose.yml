@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      # Override in a .env file for any real deployment — see README.md.
+      - HISTOVISION_JWT_SECRET=${HISTOVISION_JWT_SECRET:-dev-only-insecure-secret-change-me}
+      - HISTOVISION_SEED_USER_PASSWORD=${HISTOVISION_SEED_USER_PASSWORD:-changeme123}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped

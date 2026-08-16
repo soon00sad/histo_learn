@@ -1,0 +1,138 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { TopBar } from "../components/TopBar";
+import { Disclaimer } from "../components/Disclaimer";
+import { VerdictCard, TopZonesCard } from "../components/ResultPanels";
+import { api, ApiError, fetchAuthenticatedBlobUrl } from "../api/client";
+import type { CaseDetail } from "../api/types";
+
+export function CaseResultPage() {
+  const { caseId } = useParams<{ caseId: string }>();
+  const navigate = useNavigate();
+
+  const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  const [heatmapUrl, setHeatmapUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!caseId) return;
+    api
+      .getCase(caseId)
+      .then(async (detail) => {
+        setCaseDetail(detail);
+        const [src, heat] = await Promise.all([
+          fetchAuthenticatedBlobUrl(api.caseImageUrl(caseId)),
+          fetchAuthenticatedBlobUrl(api.caseHeatmapUrl(caseId)),
+        ]);
+        setSourceUrl(src);
+        setHeatmapUrl(heat);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить случай"));
+  }, [caseId]);
+
+  const handleConfirm = async () => {
+    if (!caseDetail) return;
+    const updated = await api.updateCaseStatus(caseDetail.id, "confirmed");
+    setCaseDetail({ ...caseDetail, status: updated.status });
+  };
+
+  if (error) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--hv-bg)" }}>
+        <TopBar active="none" />
+        <div style={{ padding: 48, color: "var(--hv-malignant)" }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (!caseDetail) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--hv-bg)" }}>
+        <TopBar active="none" />
+        <div style={{ padding: 48, color: "var(--hv-text-muted)" }}>Загрузка случая…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--hv-bg)", fontFamily: "var(--hv-font-body)" }}>
+      <TopBar active="none" />
+
+      <div style={{ padding: "36px 48px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.1, fontFamily: "var(--hv-font-display)" }}>
+            Случай {caseDetail.id}
+          </div>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 14, fontSize: 13, color: "var(--hv-text-muted)" }}>
+            <span>{new Date(caseDetail.created_at).toLocaleString("ru-RU")}</span>
+            <span style={{ width: 3, height: 3, borderRadius: "50%", background: "oklch(0.75 0.01 264)" }} />
+            <span>{caseDetail.tissue_type}</span>
+            <span style={{ width: 3, height: 3, borderRadius: "50%", background: "oklch(0.75 0.01 264)" }} />
+            <span>{caseDetail.analysis_mode === "wsi" ? "Полный препарат" : "Живой анализ"}</span>
+          </div>
+        </div>
+        <button
+          onClick={handleConfirm}
+          disabled={caseDetail.status === "confirmed"}
+          style={{
+            padding: "10px 18px", borderRadius: 10, border: "1.5px solid var(--hv-benign)",
+            background: caseDetail.status === "confirmed" ? "var(--hv-benign-soft)" : "#fff",
+            color: "var(--hv-benign)", fontWeight: 700, fontSize: 13.5,
+            cursor: caseDetail.status === "confirmed" ? "default" : "pointer",
+          }}
+        >
+          {caseDetail.status === "confirmed" ? "Подтверждён врачом" : "Подтвердить заключение"}
+        </button>
+      </div>
+
+      <div style={{ padding: "28px 48px 16px", display: "grid", gridTemplateColumns: "1.05fr 0.85fr", gap: 28, alignItems: "start" }}>
+        <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 24, boxShadow: "var(--hv-shadow-card)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)" }}>Изображение препарата</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <span style={{ fontSize: 12.5, color: "var(--hv-text-muted)", fontWeight: 600 }}>Тепловая карта</span>
+              <span
+                onClick={() => setShowHeatmap((v) => !v)}
+                style={{
+                  width: 38, height: 22, borderRadius: 20, background: "var(--hv-brand-dark)", padding: 2,
+                  display: "flex", alignItems: "center", justifyContent: showHeatmap ? "flex-end" : "flex-start",
+                }}
+              >
+                <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff" }} />
+              </span>
+            </label>
+          </div>
+          <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", aspectRatio: "4/3.1", background: "#eee" }}>
+            {(showHeatmap ? heatmapUrl : sourceUrl) && (
+              <img
+                src={(showHeatmap ? heatmapUrl : sourceUrl)!}
+                alt="Препарат"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <VerdictCard result={caseDetail} />
+          <TopZonesCard regions={caseDetail.top_regions} />
+          <button
+            onClick={() => navigate(`/cases/${caseDetail.id}/report`)}
+            style={{
+              textAlign: "center", border: "none", cursor: "pointer", padding: "16px 22px",
+              borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
+              fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
+              justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+            }}
+          >
+            {caseDetail.report_available ? "Открыть PDF-отчёт" : "Сформировать PDF-отчёт"}
+          </button>
+        </div>
+      </div>
+
+      <Disclaimer />
+    </div>
+  );
+}

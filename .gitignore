@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Model weights (downloaded, not versioned)
+models/*
+!models/.gitkeep
+
+# Runtime data (patient data must never enter git)
+data/*
+!data/.gitkeep
+!data/uploads/.gitkeep
+!data/heatmaps/.gitkeep
+!data/reports/.gitkeep
+!data/db/.gitkeep
+
+# Env / secrets
+.env
+*.local.yaml
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

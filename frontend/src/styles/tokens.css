@@ -1,0 +1,77 @@
+/* Design tokens lifted verbatim from the HistoVision design mockups
+   (Claude Design MCP project). OKLCH is used natively — no hex conversion —
+   since it's supported by all evergreen browsers this on-premise app targets. */
+:root {
+  --hv-font-display: "Sora", system-ui, sans-serif;
+  --hv-font-body: "Manrope", system-ui, sans-serif;
+
+  --hv-bg: oklch(0.97 0.006 264);
+  --hv-surface: #fff;
+  --hv-text: oklch(0.22 0.05 264);
+  --hv-text-muted: oklch(0.5 0.02 264);
+  --hv-text-faint: oklch(0.55 0.02 264);
+  --hv-border: oklch(0.9 0.006 264);
+  --hv-border-light: oklch(0.93 0.006 264);
+
+  --hv-brand: oklch(0.5 0.22 296);
+  --hv-brand-dark: oklch(0.42 0.2 288);
+  --hv-brand-soft: oklch(0.5 0.22 296 / 10%);
+  --hv-brand-gradient: linear-gradient(135deg, oklch(0.5 0.22 296), oklch(0.42 0.2 288));
+
+  --hv-malignant: oklch(0.55 0.2 27);
+  --hv-malignant-soft: oklch(0.6 0.2 27 / 12%);
+  --hv-benign: oklch(0.5 0.15 150);
+  --hv-benign-soft: oklch(0.6 0.15 150 / 12%);
+  --hv-pending: oklch(0.5 0.15 85);
+  --hv-pending-dot: oklch(0.6 0.17 85);
+
+  --hv-shadow-card: 0 24px 60px -28px oklch(0.3 0.1 264 / 35%), 0 2px 8px -2px oklch(0.3 0.1 264 / 10%);
+  --hv-shadow-topbar: 0 1px 0 oklch(0.9 0.006 264), 0 8px 24px -18px oklch(0.3 0.1 264 / 40%);
+  --hv-radius-lg: 20px;
+  --hv-radius-md: 12px;
+  --hv-radius-sm: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--hv-bg);
+  color: var(--hv-text);
+  font-family: var(--hv-font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--hv-brand);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--hv-brand-dark);
+}
+
+button {
+  font-family: inherit;
+}
+
+input {
+  font-family: inherit;
+}
+input::placeholder {
+  color: oklch(0.55 0.02 264);
+}
+
+.hv-disclaimer {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--hv-text-faint);
+  max-width: 900px;
+}

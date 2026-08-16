@@ -1,0 +1,81 @@
+# HistoVision configuration.
+# Values here are defaults for on-premise deployment; secrets (JWT secret, seed
+# user password) should be overridden via environment variables in production
+# (see .env.example / README). Nothing here is meant to be hardcoded in code.
+
+app:
+  name: HistoVision
+  version: "2.3.1"
+  disclaimer: >
+    Система поддержки принятия решений. Окончательное заключение формулирует
+    врач-патологоанатом.
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:8080"
+
+auth:
+  jwt_algorithm: "HS256"
+  access_token_expire_minutes: 480
+  # Overridden by env var HISTOVISION_AUTH__JWT_SECRET in any real deployment.
+  jwt_secret: "dev-only-insecure-secret-change-me"
+  seed_user:
+    email: "e.sokolova@clinic.ru"
+    full_name: "Елена Соколова"
+    role: "Патологоанатом"
+    # Overridden by env var HISTOVISION_AUTH__SEED_USER__PASSWORD.
+    password: "changeme123"
+
+model:
+  architecture: "efficientnet_b3"
+  num_classes: 2
+  class_names: ["benign", "malignant"]
+  malignant_class_index: 1
+  weights_path: "models/model.pth"
+  device: "cpu"
+  input_size: 224
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  # Layer GradCAM++ hooks into, resolved via attribute path on the model
+  # (model.blocks[-1][-1] for timm's efficientnet_b3), matches the prototype.
+  gradcam_target_layer: "blocks.-1.-1"
+  metrics_summary: "AUC-ROC: 0.9953 · Accuracy: 97% · Dataset: BreakHis (n=7909, одна лаборатория)"
+
+xai:
+  top_k_regions: 3
+  region_threshold_ratio: 0.5
+  min_region_pixels: 4
+
+preprocessing:
+  tissue_saturation_threshold: null   # null => Otsu-determined automatically
+  min_tissue_fraction: 0.1
+  stain_normalization_enabled: true
+  # Reference H&E stain vectors / max concentrations (Macenko et al., 2009,
+  # values commonly used as a stable H&E reference target). See docs/ALGORITHMS.md.
+  macenko_reference:
+    stain_vectors: [[0.5626, 0.2159], [0.7201, 0.8012], [0.4062, 0.5581]]
+    max_concentrations: [1.9705, 1.0308]
+
+wsi:
+  tile_size: 256
+  tile_stride: 256
+  tissue_mask_level_downsample: 32   # approx level used to build the tissue mask
+  batch_size: 16
+  max_processing_minutes: 15
+
+paths:
+  data_dir: "data"
+  uploads_dir: "data/uploads"
+  heatmaps_dir: "data/heatmaps"
+  reports_dir: "data/reports"
+  db_path: "data/db/histovision.sqlite3"
+  log_dir: "data/logs"
+
+logging:
+  level: "INFO"
+  file: "data/logs/histovision.log"
+  max_bytes: 5242880
+  backup_count: 3
