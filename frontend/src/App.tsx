@@ -7,6 +7,7 @@ import { ProcessingPage } from "./pages/ProcessingPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ReportPage } from "./pages/ReportPage";
 import { CaseResultPage } from "./pages/CaseResultPage";
+import { AnalysisV2Preview } from "./pages/AnalysisV2Preview";
 
 export default function App() {
   return (
@@ -51,6 +52,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ReportPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/preview/analysis-v2"
+            element={
+              <ProtectedRoute>
+                <AnalysisV2Preview />
               </ProtectedRoute>
             }
           />
