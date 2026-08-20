@@ -134,6 +134,40 @@ def test_find_images_dir_prefers_plain_images_name(tmp_path):
     assert prepare_bcss._find_images_dir(tmp_path).name == "images"
 
 
+def test_cmd_download_skips_failed_pairs_and_keeps_successful_ones(tmp_path, monkeypatch):
+    """Regression test for the live run that hit Google Drive's per-file
+    download quota (FileURLRetrievalError) partway through: one failing
+    pair must not abort the whole dataset — the rest should still end up
+    as a usable, split dataset."""
+    import gdown
+
+    out = tmp_path / "bcss"
+
+    def fake_download_folder(url, output, skip_download):
+        assert skip_download is True
+        entries = []
+        for i in range(3):
+            for folder in ("masks", "rgbs_colorNormalized"):
+                rel = f"{folder}/sample-{i}.png"
+                entries.append(SimpleNamespace(path=rel, local_path=str(Path(output) / rel), id=f"id-{rel}"))
+        return entries
+
+    def fake_download(id, output, quiet=False):
+        if "sample-1" in output:
+            raise RuntimeError("simulated Google Drive quota error")
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_bytes(b"fake-png-bytes")
+        return output
+
+    monkeypatch.setattr(gdown, "download_folder", fake_download_folder)
+    monkeypatch.setattr(gdown, "download", fake_download)
+
+    prepare_bcss.cmd_download(out, limit=None, val_fraction=0.5, seed=0)
+
+    all_ids = {s.id for s in list_samples(out, "train") + list_samples(out, "val")}
+    assert all_ids == {"sample-0", "sample-2"}  # sample-1's simulated failure excluded it, not fatal
+
+
 def test_prepare_bcss_synthetic_layout(tmp_path):
     out = tmp_path / "bcss_smoke"
     prepare_bcss.cmd_synthetic(out, count=4, region_size=96, val_fraction=0.5, seed=1)

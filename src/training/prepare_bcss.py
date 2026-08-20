@@ -196,7 +196,17 @@ def pair_masks_and_images(all_files, limit: int | None = None) -> dict[str, tupl
 
 
 def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -> None:
-    """Best-effort: not exercised on this dev machine (see module docstring)."""
+    """Best-effort: not exercised on this dev machine (see module docstring).
+
+    Google Drive enforces a per-file daily download quota that a widely
+    shared research dataset like BCSS routinely hits mid-run
+    (FileURLRetrievalError: "may need to change the permission ... or have
+    had many accesses"). A failing pair is skipped rather than aborting the
+    whole run, so it still produces a usable — if smaller than requested —
+    dataset; files already on disk from an earlier (partial) run are
+    skipped too, so re-running later only fetches what's still missing
+    instead of starting over.
+    """
     import gdown
 
     raw_dir = out / "_gdrive_raw"
@@ -217,15 +227,35 @@ def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -
         )
     logger.info("Downloading %d matched image/mask pairs...", len(pairs))
 
-    for image_entry, mask_entry in pairs.values():
-        for f in (image_entry, mask_entry):
-            # f.local_path is already the full destination path (gdown's
-            # download_folder joins `output` in when building it) — do not
-            # join raw_dir in again. skip_download=True also means gdown
-            # never created the directory structure, so mkdir first.
-            dest = Path(f.local_path)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            gdown.download(id=f.id, output=str(dest), quiet=False)
+    failed_ids: list[str] = []
+    succeeded = 0
+    for sample_id, (image_entry, mask_entry) in pairs.items():
+        try:
+            for f in (image_entry, mask_entry):
+                # f.local_path is already the full destination path (gdown's
+                # download_folder joins `output` in when building it) — do
+                # not join raw_dir in again. skip_download=True also means
+                # gdown never created the directory structure, so mkdir first.
+                dest = Path(f.local_path)
+                if dest.exists() and dest.stat().st_size > 0:
+                    continue  # picked up from an earlier partial run
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                gdown.download(id=f.id, output=str(dest), quiet=False)
+            succeeded += 1
+        except Exception as exc:
+            logger.warning("Skipping %s: download failed (%s)", sample_id, exc)
+            failed_ids.append(sample_id)
+
+    logger.info("Downloaded %d/%d pairs (%d failed).", succeeded, len(pairs), len(failed_ids))
+    if failed_ids:
+        preview = ", ".join(failed_ids[:20]) + (", ..." if len(failed_ids) > 20 else "")
+        logger.warning(
+            "Failed pairs (often a transient Google Drive per-file quota — "
+            "re-running this command later retries only what's missing): %s",
+            preview,
+        )
+    if succeeded == 0:
+        raise RuntimeError("All pairs failed to download — see warnings above.")
 
     cmd_from_source(raw_dir, out, val_fraction, seed)
 
