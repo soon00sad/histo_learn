@@ -1,18 +1,51 @@
+# syntax=docker/dockerfile:1
 # HistoVision backend image. libopenslide0 gives the API container real WSI
 # support even on hosts (e.g. Windows dev machines) where the OpenSlide
 # native library isn't installable via pip — see src/wsi/reader.py.
+# build-essential is needed because openslide-python 1.3.1 has no prebuilt
+# wheel for this platform and compiles a small C extension
+# (openslide._convert) at install time — plain gcc alone isn't enough, it
+# also needs libc dev headers (stdlib.h etc.).
+#
+# Deliberately NOT installing libgl1: grad-cam hard-depends on full
+# opencv-python (not headless), which needs libGL.so.1 — but pulling
+# libgl1 on Debian trixie drags in the whole Mesa/LLVM software-rendering
+# stack (libllvm19 alone is 26MB unpacking to hundreds of MB), which
+# reliably OOM-killed this build on this host. Instead we force-reinstall
+# opencv-python-headless last (see the pip step below) so the GL-free
+# build is what's actually on disk — nothing then needs libGL at runtime.
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenslide0 \
     libglib2.0-0 \
-    libgl1 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Cache mount (not --no-cache-dir): WSL2/Docker Desktop networking on this
+# machine intermittently stalls on large downloads; with a plain
+# --no-cache-dir install, any retry re-downloads everything from scratch.
+# The cache mount persists across build attempts so a retry only fetches
+# what didn't complete last time. It never bloats the final image — the
+# cache lives outside any image layer.
+#
+# torch/torchvision installed separately from the PyTorch CPU-only index:
+# the plain PyPI manylinux wheel for torch bundles the full NVIDIA CUDA
+# runtime (nvidia-cudnn-cu12 alone is ~730MB) even though this project is
+# CPU-only end to end (see docs/MODEL.md) — on Linux that's 2GB+ of unused
+# downloads. Installing from the CPU index first means requirements.txt's
+# later `torch==2.3.1`/`torchvision==0.18.1` pins are already satisfied and
+# pip skips reinstalling them from PyPI.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --retries 8 --timeout 120 \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.3.1 torchvision==0.18.1 \
+    && pip install --retries 8 --timeout 120 -r requirements.txt \
+    && pip install --retries 8 --timeout 120 --force-reinstall --no-deps \
+      opencv-python-headless==4.10.0.84
 
 COPY config ./config
 COPY src ./src
