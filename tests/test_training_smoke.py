@@ -10,6 +10,9 @@ not that the model is accurate — see docs/MODEL.md for that distinction.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 import torch
 from torch.utils.data import DataLoader
@@ -67,6 +70,68 @@ def test_compute_class_weights_favors_rare_classes():
     weights = compute_class_weights(counts)
     assert weights[1] > weights[0]  # rarer class gets a bigger weight
     assert weights.mean().item() == pytest.approx(1.0, abs=1e-4)
+
+
+def _fake_drive_entry(path: str) -> SimpleNamespace:
+    """Stands in for gdown's GoogleDriveFileToDownload (.path/.local_path/.id)."""
+    return SimpleNamespace(path=path, local_path=f"/tmp/_gdrive_raw/{path}", id=f"id-{path}")
+
+
+def test_pair_masks_and_images_ignores_logs_and_meta_and_matches_by_stem():
+    # Mirrors the real BCSS Drive folder layout: logs/ and meta/ have no
+    # counterpart to pair with; only masks/ and rgbs_colorNormalized/ matter.
+    files = [
+        _fake_drive_entry("logs/2021-05-14.log"),
+        _fake_drive_entry("meta/gtruth_codes.tsv"),
+        _fake_drive_entry("masks/TCGA-A1-1.png"),
+        _fake_drive_entry("masks/TCGA-A1-2.png"),
+        _fake_drive_entry("rgbs_colorNormalized/TCGA-A1-1.png"),
+        _fake_drive_entry("rgbs_colorNormalized/TCGA-A1-2.png"),
+    ]
+    pairs = prepare_bcss.pair_masks_and_images(files)
+    assert set(pairs) == {"TCGA-A1-1", "TCGA-A1-2"}
+    image_entry, mask_entry = pairs["TCGA-A1-1"]
+    assert image_entry.path == "rgbs_colorNormalized/TCGA-A1-1.png"
+    assert mask_entry.path == "masks/TCGA-A1-1.png"
+
+
+def test_pair_masks_and_images_naive_slice_would_have_grabbed_zero_images():
+    """Regression test for the bug from the first live Colab run: masks/
+    sorts before rgbs_colorNormalized/ in the real folder listing, so
+    slicing the first N raw files (the old implementation) grabbed only
+    masks. pair_masks_and_images must apply --limit to matched pairs, not
+    to the flat file list."""
+    files = (
+        [_fake_drive_entry("logs/x.log")]
+        + [_fake_drive_entry(f"masks/TCGA-{i}.png") for i in range(5)]
+        + [_fake_drive_entry(f"rgbs_colorNormalized/TCGA-{i}.png") for i in range(5)]
+    )
+    naive_slice = files[:3]  # what the old buggy code effectively did
+    assert all(Path(f.path).parts[0] != "rgbs_colorNormalized" for f in naive_slice), (
+        "sanity check: confirms the bug scenario this test guards against"
+    )
+
+    pairs = prepare_bcss.pair_masks_and_images(files, limit=3)
+    assert len(pairs) == 3
+    for image_entry, mask_entry in pairs.values():
+        assert Path(image_entry.path).parts[0] == "rgbs_colorNormalized"
+        assert Path(mask_entry.path).parts[0] == "masks"
+
+
+def test_pair_masks_and_images_empty_when_no_overlap():
+    files = [_fake_drive_entry("masks/only-in-masks.png")]
+    assert prepare_bcss.pair_masks_and_images(files) == {}
+
+
+def test_find_images_dir_accepts_rgbs_color_normalized_alias(tmp_path):
+    (tmp_path / "rgbs_colorNormalized").mkdir()
+    (tmp_path / "masks").mkdir()
+    assert prepare_bcss._find_images_dir(tmp_path).name == "rgbs_colorNormalized"
+
+
+def test_find_images_dir_prefers_plain_images_name(tmp_path):
+    (tmp_path / "images").mkdir()
+    assert prepare_bcss._find_images_dir(tmp_path).name == "images"
 
 
 def test_prepare_bcss_synthetic_layout(tmp_path):

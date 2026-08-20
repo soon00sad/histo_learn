@@ -128,13 +128,27 @@ def cmd_synthetic(out: Path, count: int, region_size: int, val_fraction: float, 
     logger.info("Wrote %d synthetic BCSS-shaped samples to %s", count, out)
 
 
+# The official BCSS Google Drive folder uses "rgbs_colorNormalized" as the
+# images subfolder name (not "images") — "images" is kept as an alias for
+# hand-organized/renamed local exports.
+_IMAGE_DIR_NAMES = ("images", "rgbs_colorNormalized")
+
+
+def _find_images_dir(source_dir: Path) -> Path:
+    for name in _IMAGE_DIR_NAMES:
+        candidate = source_dir / name
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(
+        f"No images directory found under {source_dir} (tried: {', '.join(_IMAGE_DIR_NAMES)})"
+    )
+
+
 def cmd_from_source(source_dir: Path, out: Path, val_fraction: float, seed: int) -> None:
-    src_images, src_masks = source_dir / "images", source_dir / "masks"
-    if not src_images.is_dir() or not src_masks.is_dir():
-        raise FileNotFoundError(
-            f"Expected {source_dir}/images/ and {source_dir}/masks/ (the layout BCSS's "
-            "own download scripts produce) — got neither or only one."
-        )
+    src_images = _find_images_dir(source_dir)
+    src_masks = source_dir / "masks"
+    if not src_masks.is_dir():
+        raise FileNotFoundError(f"Expected {source_dir}/masks/ — not found.")
 
     images_dir, masks_dir = out / "images", out / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +172,29 @@ def cmd_from_source(source_dir: Path, out: Path, val_fraction: float, seed: int)
     logger.info("Prepared %d real BCSS samples from %s into %s", len(ids), source_dir, out)
 
 
+def pair_masks_and_images(all_files, limit: int | None = None) -> dict[str, tuple[object, object]]:
+    """Pair BCSS Drive folder entries by filename stem across masks/ and
+    rgbs_colorNormalized/ (the two subfolders that matter for training).
+
+    `all_files` is whatever `gdown.download_folder(..., skip_download=True)`
+    returns: objects with `.path` (relpath within the folder, e.g.
+    "masks/TCGA-....png") and `.local_path`. Kept as a standalone function
+    (rather than inline in cmd_download) so this pairing logic — the actual
+    bug that broke the first live run, where naively slicing the flat file
+    list grabbed only masks with zero matching images — is unit-testable
+    without a real Google Drive call.
+
+    Returns {sample_id: (image_entry, mask_entry)}, capped to `limit` pairs.
+    """
+    by_relpath = {Path(f.path): f for f in all_files}
+    masks = {p.stem: f for p, f in by_relpath.items() if p.parts[0] == "masks" and p.suffix == ".png"}
+    images = {p.stem: f for p, f in by_relpath.items() if p.parts[0] == "rgbs_colorNormalized" and p.suffix == ".png"}
+    common_ids = sorted(set(masks) & set(images))
+    if limit:
+        common_ids = common_ids[:limit]
+    return {sample_id: (images[sample_id], masks[sample_id]) for sample_id in common_ids}
+
+
 def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -> None:
     """Best-effort: not exercised on this dev machine (see module docstring)."""
     import gdown
@@ -170,17 +207,25 @@ def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -
         "a constrained dev box.",
         BCSS_DRIVE_FOLDER_URL,
     )
-    files = gdown.download_folder(url=BCSS_DRIVE_FOLDER_URL, output=str(raw_dir), skip_download=True)
-    if limit:
-        files = files[:limit]
-    for f in files:
-        # f.local_path is already the full destination path (gdown's
-        # download_folder joins `output` in when building it) — do not join
-        # raw_dir in again. skip_download=True also means gdown never created
-        # the directory structure, so we must mkdir before downloading.
-        dest = Path(f.local_path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        gdown.download(id=f.id, output=str(dest), quiet=False)
+    all_files = gdown.download_folder(url=BCSS_DRIVE_FOLDER_URL, output=str(raw_dir), skip_download=True)
+
+    pairs = pair_masks_and_images(all_files, limit)
+    if not pairs:
+        raise ValueError(
+            "No matching image/mask pairs found in the BCSS Drive folder listing "
+            "(expected masks/ and rgbs_colorNormalized/ subfolders)."
+        )
+    logger.info("Downloading %d matched image/mask pairs...", len(pairs))
+
+    for image_entry, mask_entry in pairs.values():
+        for f in (image_entry, mask_entry):
+            # f.local_path is already the full destination path (gdown's
+            # download_folder joins `output` in when building it) — do not
+            # join raw_dir in again. skip_download=True also means gdown
+            # never created the directory structure, so mkdir first.
+            dest = Path(f.local_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            gdown.download(id=f.id, output=str(dest), quiet=False)
 
     cmd_from_source(raw_dir, out, val_fraction, seed)
 
