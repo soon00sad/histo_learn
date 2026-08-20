@@ -174,7 +174,13 @@ def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -
     if limit:
         files = files[:limit]
     for f in files:
-        gdown.download(id=f.id, output=str(raw_dir / f.local_path), quiet=False)
+        # f.local_path is already the full destination path (gdown's
+        # download_folder joins `output` in when building it) — do not join
+        # raw_dir in again. skip_download=True also means gdown never created
+        # the directory structure, so we must mkdir before downloading.
+        dest = Path(f.local_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        gdown.download(id=f.id, output=str(dest), quiet=False)
 
     cmd_from_source(raw_dir, out, val_fraction, seed)
 
