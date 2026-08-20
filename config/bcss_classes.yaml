@@ -1,0 +1,117 @@
+# BCSS (Breast Cancer Semantic Segmentation) class taxonomy for HistoVision's
+# segmentation model. Single source of truth for dataset preparation, training,
+# inference, WSI aggregation, and the frontend legend — see docs/MODEL.md and
+# docs/ALGORITHMS.md for the rationale behind this specific grouping.
+#
+# Raw BCSS codes come from the official taxonomy (PathologyDataScience/BCSS,
+# meta/gtruth_codes.tsv — 22 codes: 0=outside_roi + 21 real classes). We merge
+# down to 16 working classes: only truly rare or closely-related raw classes
+# are combined (e.g. angioinvasion -> tumor, plasma_cells -> other_immune_infiltrate);
+# clinically distinct categories (tumor vs dcis, blood vs blood_vessel, etc.)
+# are kept separate. Raw code 0 (outside_roi) is the ignore class: excluded
+# from loss and from mIoU, per BCSS's own documentation.
+#
+# class_id 0 is reserved for "ignore" (maps from raw_code 0) and is never a
+# model output class — model logits/probabilities are indexed 0..15 for the
+# 16 named classes below, with the "id" field here counting from 1 to keep
+# the raw-code table below readable; src/training and src/inference subtract
+# 1 to get the 0-based model class index.
+
+ignore_raw_code: 0
+
+classes:
+  - id: 1
+    name_en: tumor
+    name_ru: "Опухоль"
+    color: "#D63A2C"
+    raw_codes: [1, 19]   # tumor, angioinvasion
+
+  - id: 2
+    name_en: dcis
+    name_ru: "DCIS (протоковая карцинома in situ)"
+    color: "#A01E3C"
+    raw_codes: [20]      # dcis
+
+  - id: 3
+    name_en: stroma
+    name_ru: "Строма"
+    color: "#3E74D6"
+    raw_codes: [2]       # stroma
+
+  - id: 4
+    name_en: lymphocytic_infiltrate
+    name_ru: "Лимфоцитарная инфильтрация"
+    color: "#24A884"
+    raw_codes: [3]       # lymphocytic_infiltrate
+
+  - id: 5
+    name_en: other_immune_infiltrate
+    name_ru: "Прочая иммунная инфильтрация"
+    color: "#2D8C96"
+    raw_codes: [11, 10]  # other_immune_infiltrate, plasma_cells
+
+  - id: 6
+    name_en: necrosis_or_debris
+    name_ru: "Некроз / детрит"
+    color: "#C48E20"
+    raw_codes: [4]       # necrosis_or_debris
+
+  - id: 7
+    name_en: mucoid_material
+    name_ru: "Слизистый материал"
+    color: "#B48CDC"
+    raw_codes: [12, 5]   # mucoid_material, glandular_secretions
+
+  - id: 8
+    name_en: blood
+    name_ru: "Кровь"
+    color: "#B41414"
+    raw_codes: [6]       # blood
+
+  - id: 9
+    name_en: blood_vessel
+    name_ru: "Сосуды (кровеносные/лимфатические)"
+    color: "#E67828"
+    raw_codes: [18, 14]  # blood_vessel, lymphatics
+
+  - id: 10
+    name_en: fat
+    name_ru: "Жировая ткань"
+    color: "#E6D278"
+    raw_codes: [9]       # fat
+
+  - id: 11
+    name_en: metaplasia_nos
+    name_ru: "Метаплазия"
+    color: "#DC78AA"
+    raw_codes: [8]       # metaplasia_NOS
+
+  - id: 12
+    name_en: normal_acinus_or_duct
+    name_ru: "Нормальный ацинус/проток"
+    color: "#8860CE"
+    raw_codes: [13]      # normal_acinus_or_duct
+
+  - id: 13
+    name_en: nerve
+    name_ru: "Нерв"
+    color: "#3CBED2"
+    raw_codes: [16]      # nerve
+
+  - id: 14
+    name_en: skin_adnexa
+    name_ru: "Придатки кожи"
+    color: "#785032"
+    raw_codes: [17]      # skin_adnexa
+
+  - id: 15
+    name_en: undetermined
+    name_ru: "Неопределено"
+    color: "#8C8C8C"
+    raw_codes: [15]      # undetermined
+
+  - id: 16
+    name_en: other
+    name_ru: "Прочее"
+    color: "#5A5A5A"
+    raw_codes: [21, 7]   # other, exclude
