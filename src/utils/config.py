@@ -59,6 +59,20 @@ class ModelConfig(BaseModel):
     metrics_summary: str
 
 
+class SegmentationModelConfig(BaseModel):
+    """DeepLabV3+ segmentation model (src/inference/segmenter.py). Class
+    count/names/colors come from config/bcss_classes.yaml, not here —
+    single source of truth for the taxonomy (see src/utils/bcss_classes.py)."""
+
+    encoder_name: str
+    weights_path: str
+    device: str
+    input_size: int
+    normalize_mean: list[float]
+    normalize_std: list[float]
+    metrics_summary: str
+
+
 class XaiConfig(BaseModel):
     top_k_regions: int
     region_threshold_ratio: float
@@ -106,6 +120,7 @@ class Settings(BaseModel):
     server: ServerConfig
     auth: AuthConfig
     model: ModelConfig
+    segmentation_model: SegmentationModelConfig
     xai: XaiConfig
     preprocessing: PreprocessingConfig
     wsi: WsiConfig

@@ -44,6 +44,24 @@ model:
   gradcam_target_layer: "blocks.-1.-1"
   metrics_summary: "AUC-ROC: 0.9953 · Accuracy: 97% · Dataset: BreakHis (n=7909, одна лаборатория)"
 
+# Semantic segmentation model (src/inference/segmenter.py), feature/segmentation
+# branch only — the classifier above (`model:`) is untouched and still what
+# `master` uses. Class taxonomy (names/colors/count) lives in
+# config/bcss_classes.yaml, not here.
+segmentation_model:
+  encoder_name: "resnet18"
+  weights_path: "models/segmentation.pth"
+  device: "cpu"
+  input_size: 256
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  # Honest placeholder: trained on a partial BCSS sample on a Colab T4 GPU
+  # (see notebooks/train_segmentation_colab.ipynb); the exact mIoU from that
+  # run was not reliably recorded. Do not reuse the BreakHis numbers above —
+  # different dataset, different task. Needs a proper re-validation pass
+  # before this string can quote a real mIoU.
+  metrics_summary: "Dataset: BCSS (частичная выборка) · mIoU: не подтверждён, требуется повторная валидация"
+
 xai:
   top_k_regions: 3
   region_threshold_ratio: 0.5

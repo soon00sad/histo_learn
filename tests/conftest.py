@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import segmentation_models_pytorch as smp
 import timm
 from PIL import Image
 
+from src.utils.bcss_classes import load_bcss_classes
 from src.utils.config import get_settings
 
 
@@ -56,3 +58,21 @@ def stub_load_model(monkeypatch, settings):
 
     monkeypatch.setattr("src.inference.classifier.load_model", _fake_load_model)
     return _fake_load_model
+
+
+@pytest.fixture
+def stub_load_segmentation_model(monkeypatch, settings):
+    """Same idea as stub_load_model, for the DeepLabV3+ segmentation model —
+    untrained (encoder_weights=None) so tests don't need models/segmentation.pth."""
+
+    def _fake_load_segmentation_model(_settings=None):
+        cfg = settings.segmentation_model
+        num_classes = load_bcss_classes().num_classes
+        model = smp.DeepLabV3Plus(
+            encoder_name=cfg.encoder_name, encoder_weights=None, in_channels=3, classes=num_classes
+        )
+        model.eval()
+        return model
+
+    monkeypatch.setattr("src.inference.segmenter.load_segmentation_model", _fake_load_segmentation_model)
+    return _fake_load_segmentation_model
