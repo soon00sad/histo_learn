@@ -24,11 +24,15 @@ class Token(BaseModel):
     user: UserOut
 
 
-class RegionOut(BaseModel):
-    rank: int
-    x: int
-    y: int
-    score: float
+class ClassAreaOut(BaseModel):
+    """One tissue class' share of the analyzed area — see
+    config/bcss_classes.yaml for the taxonomy and src/inference/verdict.py
+    for how the verdict is derived from these."""
+
+    name_en: str
+    name_ru: str
+    color: str
+    fraction: float
 
 
 class IhcMarkers(BaseModel):
@@ -42,10 +46,8 @@ class AnalysisResult(BaseModel):
     case_id: str
     verdict_label: str
     is_malignant: bool
-    confidence: float
-    malignant_probability: float
-    benign_probability: float
-    top_regions: list[RegionOut]
+    tumor_area_fraction: float
+    class_areas: list[ClassAreaOut]
     analysis_mode: str
 
 
@@ -55,16 +57,14 @@ class CaseSummary(BaseModel):
     tissue_type: str
     verdict_label: str
     is_malignant: bool
-    confidence: float
+    tumor_area_fraction: float
     status: str
 
 
 class CaseDetail(CaseSummary):
     source_filename: str
     analysis_mode: str
-    malignant_probability: float
-    benign_probability: float
-    top_regions: list[RegionOut]
+    class_areas: list[ClassAreaOut]
     ki67: Optional[float]
     er_status: Optional[str]
     pr_status: Optional[str]

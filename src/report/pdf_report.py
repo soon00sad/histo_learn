@@ -7,11 +7,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image, UnidentifiedImageError
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     Image as RLImage,
     Paragraph,
@@ -26,6 +29,50 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
+
+# ReportLab's built-in base-14 fonts ("Helvetica" etc.) only cover Latin
+# WinAnsiEncoding — every Cyrillic character in this report (labels,
+# disclaimer, tissue type...) rendered as a solid black glyph-missing box
+# under them, discovered by actually opening a generated PDF, not just
+# checking the HTTP status. DejaVu Sans has full Cyrillic coverage and is
+# already bundled as TTF data with matplotlib (an existing transitive
+# dependency via grad-cam) — reusing it needs no new dependency or binary
+# asset committed to the repo, unlike shipping our own font file.
+def _register_fonts() -> str:
+    """Returns the font family name to actually use: "DejaVuSans" if
+    registration succeeds, or ReportLab's built-in "Helvetica" (always
+    available, but Latin-only — Cyrillic renders as missing-glyph boxes
+    under it) if matplotlib's bundled TTFs can't be found for some reason.
+    """
+    family = "DejaVuSans"
+    try:
+        import matplotlib
+
+        ttf_dir = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+        for name, filename in [
+            (family, "DejaVuSans.ttf"),
+            (f"{family}-Bold", "DejaVuSans-Bold.ttf"),
+            (f"{family}-Oblique", "DejaVuSans-Oblique.ttf"),
+            (f"{family}-BoldOblique", "DejaVuSans-BoldOblique.ttf"),
+        ]:
+            pdfmetrics.registerFont(TTFont(name, str(ttf_dir / filename)))
+        pdfmetrics.registerFontFamily(
+            family,
+            normal=family, bold=f"{family}-Bold",
+            italic=f"{family}-Oblique", boldItalic=f"{family}-BoldOblique",
+        )
+        return family
+    except Exception:
+        logger.exception(
+            "Could not register DejaVu Sans for Cyrillic PDF text — falling back to "
+            "Helvetica, Russian text will render as missing-glyph boxes."
+        )
+        return "Helvetica"
+
+
+_FONT = _register_fonts()
+_FONT_BOLD = f"{_FONT}-Bold"
+_FONT_OBLIQUE = f"{_FONT}-Oblique"
 
 # Approximate hex equivalents of the frontend's OKLCH brand palette — ReportLab
 # has no OKLCH support, so these are print-only approximations of the values
@@ -70,33 +117,46 @@ class ReportData:
 
 def _styles() -> dict[str, ParagraphStyle]:
     return {
-        "doc_title": ParagraphStyle("doc_title", fontName="Helvetica-Bold", fontSize=13,
+        "doc_title": ParagraphStyle("doc_title", fontName=_FONT_BOLD, fontSize=13,
                                      textColor=_DARK_TEXT, alignment=2, leading=15),
-        "doc_meta": ParagraphStyle("doc_meta", fontName="Helvetica", fontSize=8.5,
+        "doc_meta": ParagraphStyle("doc_meta", fontName=_FONT, fontSize=8.5,
                                     textColor=_MUTED_TEXT, alignment=2, leading=11),
-        "label": ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=8,
+        "label": ParagraphStyle("label", fontName=_FONT_BOLD, fontSize=8,
                                  textColor=_MUTED_TEXT, leading=10, spaceAfter=4),
-        "verdict": ParagraphStyle("verdict", fontName="Helvetica-Bold", fontSize=17,
+        "verdict": ParagraphStyle("verdict", fontName=_FONT_BOLD, fontSize=17,
                                    leading=20),
-        "verdict_sub": ParagraphStyle("verdict_sub", fontName="Helvetica", fontSize=9,
+        "verdict_sub": ParagraphStyle("verdict_sub", fontName=_FONT, fontSize=9,
                                        textColor=_MUTED_TEXT, leading=12),
-        "body": ParagraphStyle("body", fontName="Helvetica", fontSize=9,
+        "body": ParagraphStyle("body", fontName=_FONT, fontSize=9,
                                 textColor=_DARK_TEXT, leading=13),
-        "disclaimer": ParagraphStyle("disclaimer", fontName="Helvetica-Oblique", fontSize=8,
+        "disclaimer": ParagraphStyle("disclaimer", fontName=_FONT_OBLIQUE, fontSize=8,
                                       textColor=_MUTED_TEXT, leading=12),
-        "small": ParagraphStyle("small", fontName="Helvetica", fontSize=8,
+        "small": ParagraphStyle("small", fontName=_FONT, fontSize=8,
                                  textColor=_MUTED_TEXT, leading=11),
-        "table_cell": ParagraphStyle("table_cell", fontName="Helvetica", fontSize=9,
+        "table_cell": ParagraphStyle("table_cell", fontName=_FONT, fontSize=9,
                                       textColor=_DARK_TEXT),
     }
+
+
+def _is_readable_image(path: Path) -> bool:
+    """`.exists()` alone isn't enough — a present-but-corrupt/truncated file
+    (seen in practice: src/report/assets/logo.png) makes ReportLab's
+    drawImage() raise deep inside rendering, well past the point where a
+    fallback could still be swapped in. Decode it up front instead."""
+    try:
+        with Image.open(path) as img:
+            img.load()
+        return True
+    except (UnidentifiedImageError, OSError):
+        return False
 
 
 def _build_header(data: ReportData, styles: dict) -> Table:
     logo_path = data.logo_path or _DEFAULT_LOGO_PATH
     logo_cell = (
         RLImage(str(logo_path), width=1.3 * inch, height=0.26 * inch)
-        if logo_path and logo_path.exists()
-        else Paragraph("HistoVision", ParagraphStyle("logo_fallback", fontName="Helvetica-Bold",
+        if logo_path and logo_path.exists() and _is_readable_image(logo_path)
+        else Paragraph("HistoVision", ParagraphStyle("logo_fallback", fontName=_FONT_BOLD,
                                                        fontSize=14, textColor=_BRAND_PRIMARY))
     )
     meta = [
@@ -118,7 +178,7 @@ def _build_header(data: ReportData, styles: dict) -> Table:
 
 def _build_left_column(data: ReportData, styles: dict) -> list:
     elements = [Paragraph("ИЗОБРАЖЕНИЕ ПРЕПАРАТА С ТЕПЛОВОЙ КАРТОЙ", styles["label"])]
-    if data.heatmap_image_path.exists():
+    if data.heatmap_image_path.exists() and _is_readable_image(data.heatmap_image_path):
         elements.append(RLImage(str(data.heatmap_image_path), width=3.35 * inch, height=2.7 * inch))
     elements.append(Spacer(1, 10))
     elements.append(Paragraph("ТОП-3 ЗОНЫ ВНИМАНИЯ", styles["label"]))
@@ -128,12 +188,12 @@ def _build_left_column(data: ReportData, styles: dict) -> list:
         rows.append([str(region.rank), f"X: {region.x}, Y: {region.y}", f"{region.score:.1%}"])
     zones_table = Table(rows, colWidths=[0.3 * inch, 1.9 * inch, 1.15 * inch])
     zones_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 0), (-1, 0), _FONT_BOLD),
+        ("FONTNAME", (0, 1), (-1, -1), _FONT),
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("TEXTCOLOR", (0, 0), (-1, 0), _MUTED_TEXT),
         ("TEXTCOLOR", (-1, 1), (-1, -1), _MALIGNANT_COLOR),
-        ("FONTNAME", (-1, 1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (-1, 1), (-1, -1), _FONT_BOLD),
         ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, 0), 0.75, _BORDER),
         ("LINEBELOW", (0, 1), (-1, -2), 0.5, _BORDER),

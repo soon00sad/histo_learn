@@ -7,37 +7,75 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Optional
 
+import numpy as np
 from PIL import Image
 
 from src.api.db import Case
-from src.api.schemas import CaseDetail, CaseSummary, RegionOut
-from src.report.pdf_report import ReportData, ReportRegion
+from src.api.schemas import CaseDetail, CaseSummary, ClassAreaOut
+from src.inference.wsi_segmenter import UNCOVERED
+from src.report.pdf_report import ReportData
+from src.utils.bcss_classes import BcssTaxonomy, load_bcss_classes
 from src.utils.config import Settings
-from src.xai.regions import AttentionRegion
-
-_VERDICT_MALIGNANT = "Злокачественная"
-_VERDICT_BENIGN = "Доброкачественная"
 
 
-def verdict_label_ru(is_malignant: bool) -> str:
-    return _VERDICT_MALIGNANT if is_malignant else _VERDICT_BENIGN
+def class_areas_to_json(fractions: dict[str, float]) -> str:
+    return json.dumps(fractions)
 
 
-def regions_to_json(regions: Sequence[AttentionRegion]) -> str:
-    return json.dumps(
-        [{"rank": i + 1, "x": r.x, "y": r.y, "score": r.score} for i, r in enumerate(regions)]
-    )
+def json_to_class_areas(raw: str, taxonomy: Optional[BcssTaxonomy] = None) -> list[ClassAreaOut]:
+    taxonomy = taxonomy or load_bcss_classes()
+    by_name = {c.name_en: c for c in taxonomy.classes}
+    fractions: dict[str, float] = json.loads(raw)
 
-
-def json_to_region_out(raw: str) -> list[RegionOut]:
-    return [RegionOut(**item) for item in json.loads(raw)]
+    result: list[ClassAreaOut] = []
+    for name, fraction in sorted(fractions.items(), key=lambda item: -item[1]):
+        bcss_class = by_name.get(name)
+        if bcss_class is None:
+            continue  # defensive: ignore an unrecognized class name rather than 500
+        result.append(
+            ClassAreaOut(name_en=bcss_class.name_en, name_ru=bcss_class.name_ru,
+                         color=bcss_class.color, fraction=fraction)
+        )
+    return result
 
 
 def save_image(image: Image.Image, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.convert("RGB").save(path, format="JPEG", quality=90)
+    return path
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def save_mask_png(mask: np.ndarray, path: Path, taxonomy: Optional[BcssTaxonomy] = None) -> Path:
+    """Lossless indexed PNG: each pixel's byte value *is* its model class
+    index — JPEG's lossy compression would corrupt exact class IDs, which a
+    heatmap-style scalar overlay never needed to worry about. The palette
+    maps indices to config/bcss_classes.yaml's colors; UNCOVERED (255,
+    background/glass no tile ever touched — see wsi_segmenter.py) gets a
+    fully transparent palette entry via a tRNS chunk, so the frontend's
+    mix-blend-mode overlay shows the tissue image through it instead of a
+    stray color (this is also the pixel value single-patch segmentation
+    never produces, since the whole input patch is always covered).
+    """
+    taxonomy = taxonomy or load_bcss_classes()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    img = Image.fromarray(mask, mode="P")
+    palette = [0, 0, 0] * 256
+    alpha = bytearray([255] * 256)
+    for bcss_class in taxonomy.classes:
+        r, g, b = _hex_to_rgb(bcss_class.color)
+        offset = bcss_class.model_index * 3
+        palette[offset:offset + 3] = [r, g, b]
+    alpha[UNCOVERED] = 0
+    img.putpalette(palette)
+    img.save(path, format="PNG", transparency=bytes(alpha))
     return path
 
 
@@ -48,7 +86,7 @@ def case_to_summary(case: Case) -> CaseSummary:
         tissue_type=case.tissue_type,
         verdict_label=case.verdict_label,
         is_malignant=case.is_malignant,
-        confidence=case.confidence,
+        tumor_area_fraction=case.tumor_area_fraction,
         status=case.status.value,
     )
 
@@ -59,9 +97,7 @@ def case_to_detail(case: Case) -> CaseDetail:
         **summary.model_dump(),
         source_filename=case.source_filename,
         analysis_mode=case.analysis_mode,
-        malignant_probability=case.malignant_probability,
-        benign_probability=case.benign_probability,
-        top_regions=json_to_region_out(case.top_regions_json),
+        class_areas=json_to_class_areas(case.class_areas_json),
         ki67=case.ki67,
         er_status=case.er_status,
         pr_status=case.pr_status,
@@ -71,7 +107,19 @@ def case_to_detail(case: Case) -> CaseDetail:
 
 
 def build_report_data(case: Case, settings: Settings, doctor_name: str) -> ReportData:
-    regions = json_to_region_out(case.top_regions_json)
+    """Interim adapter: maps the segmentation Case schema onto pdf_report.py's
+    still-binary-shaped ReportData (top_regions + malignant/benign
+    probability bars) so the PDF keeps generating correctly without a
+    crash. Redesigning the PDF's own layout (mask image, N-class area
+    breakdown) is a separate later phase, not this one — see the approved
+    plan; treat this mapping as a deliberate stopgap, not the final shape.
+    tumor_area_fraction stands in for both "malignant_probability" and
+    "confidence" (when malignant) since segmentation has no single
+    predicted-class probability the way the old classifier did.
+    """
+    tumor_fraction = case.tumor_area_fraction
+    confidence = tumor_fraction if case.is_malignant else 1.0 - tumor_fraction
+
     return ReportData(
         case_id=case.id,
         created_at=case.created_at.strftime("%d.%m.%Y, %H:%M"),
@@ -80,11 +128,11 @@ def build_report_data(case: Case, settings: Settings, doctor_name: str) -> Repor
         analysis_mode="Полный препарат" if case.analysis_mode == "wsi" else "Живой анализ",
         verdict_label=case.verdict_label,
         is_malignant=case.is_malignant,
-        confidence=case.confidence,
-        malignant_probability=case.malignant_probability,
-        benign_probability=case.benign_probability,
-        top_regions=[ReportRegion(rank=r.rank, x=r.x, y=r.y, score=r.score) for r in regions],
-        heatmap_image_path=settings.resolve_path(case.heatmap_image_path),
+        confidence=confidence,
+        malignant_probability=tumor_fraction,
+        benign_probability=1.0 - tumor_fraction,
+        top_regions=[],  # GradCAM boxes don't apply to segmentation — the mask itself is the explanation
+        heatmap_image_path=settings.resolve_path(case.mask_image_path),
         disclaimer=settings.app.disclaimer,
         model_version=settings.app.version,
         generated_at=dt.datetime.utcnow().strftime("%d.%m.%Y, %H:%M"),

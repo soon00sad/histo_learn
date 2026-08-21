@@ -1,5 +1,9 @@
 """Analysis endpoints: single-patch (synchronous, seconds) and whole-slide
-(asynchronous job, up to ~15 min on CPU — see docs/ALGORITHMS.md)."""
+(asynchronous job, up to ~15 min on CPU — see docs/ALGORITHMS.md).
+
+Segmentation path: the mask itself is the explanation (no GradCAM boxes —
+src/xai/ stays untouched but unused here, still needed by the binary path
+on master)."""
 from __future__ import annotations
 
 import shutil
@@ -10,21 +14,32 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
-from src.api.case_service import regions_to_json, save_image, verdict_label_ru
+from src.api.case_service import class_areas_to_json, save_image, save_mask_png
 from src.api.db import Case, Job, JobStatus, User, generate_case_id, generate_job_id, session_scope
 from src.api.deps import current_user, db_session, settings_dep
-from src.api.ml_runtime import get_classifier, get_explainer
-from src.api.schemas import AnalysisResult, JobAccepted, RegionOut
-from src.inference.wsi_aggregator import WsiAnalysisResult, analyze_wsi
+from src.api.ml_runtime import get_segmenter
+from src.api.schemas import AnalysisResult, ClassAreaOut, JobAccepted
+from src.inference.verdict import derive_verdict
+from src.inference.wsi_segmenter import analyze_wsi_segmentation
+from src.utils.bcss_classes import load_bcss_classes
 from src.utils.config import Settings, get_settings
 from src.utils.logging import get_logger
 from src.wsi.reader import OpenSlideUnavailableError, UnsupportedSlideError
-from src.xai.regions import AttentionRegion, top_k_regions
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/analyze", tags=["analysis"])
 
 _DEFAULT_TISSUE_TYPE = "Молочная железа, биопсия"
+
+
+def _class_areas_out(fractions: dict[str, float]) -> list[ClassAreaOut]:
+    taxonomy = load_bcss_classes()
+    by_name = {c.name_en: c for c in taxonomy.classes}
+    return [
+        ClassAreaOut(name_en=by_name[name].name_en, name_ru=by_name[name].name_ru,
+                     color=by_name[name].color, fraction=fraction)
+        for name, fraction in sorted(fractions.items(), key=lambda item: -item[1])
+    ]
 
 
 @router.post("/patch", response_model=AnalysisResult)
@@ -48,22 +63,15 @@ async def analyze_patch(
             detail="Не удалось прочитать файл изображения. Поддерживаются форматы PNG и JPEG.",
         ) from exc
 
-    classifier = get_classifier()
-    explainer = get_explainer()
-
-    result = classifier.classify(image)
-    malignant_name = settings.model.class_names[settings.model.malignant_class_index]
-    benign_name = next(n for n in settings.model.class_names if n != malignant_name)
-    is_malignant = result.predicted_label == malignant_name
-
-    grayscale_cam, overlay = explainer.explain(image, target_class=result.predicted_class)
-    regions = top_k_regions(grayscale_cam, settings.xai)
+    segmenter = get_segmenter()
+    result = segmenter.segment(image)
+    verdict = derive_verdict(result.class_pixel_fractions, settings)
 
     case_id = generate_case_id(session)
     source_rel = f"{settings.paths.uploads_dir}/{case_id}.jpg"
-    heatmap_rel = f"{settings.paths.heatmaps_dir}/{case_id}.jpg"
+    mask_rel = f"{settings.paths.heatmaps_dir}/{case_id}.png"
     save_image(image, settings.resolve_path(source_rel))
-    save_image(Image.fromarray(overlay), settings.resolve_path(heatmap_rel))
+    save_mask_png(result.mask, settings.resolve_path(mask_rel))
 
     case = Case(
         id=case_id,
@@ -71,14 +79,12 @@ async def analyze_patch(
         tissue_type=tissue_type,
         source_filename=file.filename or f"{case_id}.jpg",
         analysis_mode="patch",
-        verdict_label=verdict_label_ru(is_malignant),
-        is_malignant=is_malignant,
-        confidence=result.confidence,
-        malignant_probability=result.probabilities[malignant_name],
-        benign_probability=result.probabilities[benign_name],
-        top_regions_json=regions_to_json(regions),
+        verdict_label=verdict.verdict_label,
+        is_malignant=verdict.is_malignant,
+        tumor_area_fraction=verdict.tumor_area_fraction,
+        class_areas_json=class_areas_to_json(result.class_pixel_fractions),
         source_image_path=source_rel,
-        heatmap_image_path=heatmap_rel,
+        mask_image_path=mask_rel,
         ki67=ki67,
         er_status=er_status,
         pr_status=pr_status,
@@ -86,16 +92,14 @@ async def analyze_patch(
     )
     session.add(case)
     session.commit()
-    logger.info("Patch analysis complete for case %s (%s)", case_id, case.verdict_label)
+    logger.info("Patch segmentation complete for case %s (%s)", case_id, case.verdict_label)
 
     return AnalysisResult(
         case_id=case.id,
         verdict_label=case.verdict_label,
-        is_malignant=is_malignant,
-        confidence=case.confidence,
-        malignant_probability=case.malignant_probability,
-        benign_probability=case.benign_probability,
-        top_regions=[RegionOut(rank=i + 1, x=r.x, y=r.y, score=r.score) for i, r in enumerate(regions)],
+        is_malignant=case.is_malignant,
+        tumor_area_fraction=case.tumor_area_fraction,
+        class_areas=_class_areas_out(result.class_pixel_fractions),
         analysis_mode="patch",
     )
 
@@ -139,19 +143,8 @@ async def analyze_wsi_endpoint(
         pr_status=pr_status,
         her2_status=her2_status,
     )
-    logger.info("Queued WSI job %s for %s", job_id, file.filename)
+    logger.info("Queued WSI segmentation job %s for %s", job_id, file.filename)
     return JobAccepted(job_id=job_id)
-
-
-def _top_wsi_regions(result: WsiAnalysisResult, malignant_name: str, top_k: int) -> list[AttentionRegion]:
-    ranked = sorted(
-        result.tile_results, key=lambda tr: tr.result.probabilities[malignant_name], reverse=True
-    )[:top_k]
-    return [
-        AttentionRegion(x=tr.tile.x, y=tr.tile.y, width=0, height=0,
-                         score=tr.result.probabilities[malignant_name])
-        for tr in ranked
-    ]
 
 
 def _run_wsi_job(
@@ -165,8 +158,9 @@ def _run_wsi_job(
     pr_status: Optional[str],
     her2_status: Optional[str],
 ) -> None:
-    """Runs in a FastAPI BackgroundTasks worker thread: the full WSI pipeline
-    with progress written back to the `jobs` table for polling."""
+    """Runs in a FastAPI BackgroundTasks worker thread: the full WSI
+    segmentation pipeline with progress written back to the `jobs` table for
+    polling."""
     settings = get_settings()
 
     with session_scope() as session:
@@ -183,11 +177,11 @@ def _run_wsi_job(
             progress_session.commit()
 
     try:
-        result = analyze_wsi(
-            str(slide_path), settings, classifier=get_classifier(), on_progress=on_progress
+        result = analyze_wsi_segmentation(
+            str(slide_path), settings, segmenter=get_segmenter(), on_progress=on_progress
         )
     except (OpenSlideUnavailableError, UnsupportedSlideError, FileNotFoundError, ValueError) as exc:
-        logger.warning("WSI job %s failed: %s", job_id, exc)
+        logger.warning("WSI segmentation job %s failed: %s", job_id, exc)
         with session_scope() as session:
             job = session.get(Job, job_id)
             job.status = JobStatus.FAILED
@@ -195,7 +189,7 @@ def _run_wsi_job(
             session.commit()
         return
     except Exception as exc:  # unexpected failure — still surface it, don't hang the UI forever
-        logger.exception("WSI job %s failed unexpectedly", job_id)
+        logger.exception("WSI segmentation job %s failed unexpectedly", job_id)
         with session_scope() as session:
             job = session.get(Job, job_id)
             job.status = JobStatus.FAILED
@@ -203,17 +197,12 @@ def _run_wsi_job(
             session.commit()
         return
 
-    malignant_name = settings.model.class_names[settings.model.malignant_class_index]
-    benign_name = next(n for n in settings.model.class_names if n != malignant_name)
-    is_malignant = result.verdict_label == malignant_name
-    regions = _top_wsi_regions(result, malignant_name, settings.xai.top_k_regions)
-
     with session_scope() as session:
         case_id = generate_case_id(session)
         thumb_rel = f"{settings.paths.uploads_dir}/{case_id}_thumb.jpg"
-        heatmap_rel = f"{settings.paths.heatmaps_dir}/{case_id}.jpg"
+        mask_rel = f"{settings.paths.heatmaps_dir}/{case_id}.png"
         save_image(result.thumbnail, settings.resolve_path(thumb_rel))
-        save_image(result.heatmap_overlay, settings.resolve_path(heatmap_rel))
+        save_mask_png(result.mask, settings.resolve_path(mask_rel))
 
         case = Case(
             id=case_id,
@@ -221,14 +210,12 @@ def _run_wsi_job(
             tissue_type=tissue_type,
             source_filename=source_filename,
             analysis_mode="wsi",
-            verdict_label=verdict_label_ru(is_malignant),
-            is_malignant=is_malignant,
-            confidence=result.confidence,
-            malignant_probability=result.probabilities[malignant_name],
-            benign_probability=result.probabilities[benign_name],
-            top_regions_json=regions_to_json(regions),
+            verdict_label=result.verdict.verdict_label,
+            is_malignant=result.verdict.is_malignant,
+            tumor_area_fraction=result.verdict.tumor_area_fraction,
+            class_areas_json=class_areas_to_json(result.class_area_fractions),
             source_image_path=thumb_rel,
-            heatmap_image_path=heatmap_rel,
+            mask_image_path=mask_rel,
             ki67=ki67,
             er_status=er_status,
             pr_status=pr_status,
@@ -246,6 +233,6 @@ def _run_wsi_job(
         session.commit()
 
     logger.info(
-        "WSI job %s complete -> case %s (%s, %d/%d tiles analyzed)",
-        job_id, case_id, verdict_label_ru(is_malignant), result.tiles_analyzed, result.tiles_total,
+        "WSI segmentation job %s complete -> case %s (%s, %d/%d tiles analyzed)",
+        job_id, case_id, result.verdict.verdict_label, result.tiles_analyzed, result.tiles_total,
     )

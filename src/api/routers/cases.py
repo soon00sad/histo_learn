@@ -85,15 +85,15 @@ def get_case_image(
     return FileResponse(path, media_type="image/jpeg")
 
 
-@router.get("/{case_id}/heatmap")
-def get_case_heatmap(
+@router.get("/{case_id}/mask")
+def get_case_mask(
     case_id: str,
     session: Session = Depends(db_session),
     settings: Settings = Depends(settings_dep),
     _user: User = Depends(current_user),
 ) -> FileResponse:
     case = _get_case_or_404(session, case_id)
-    path = settings.resolve_path(case.heatmap_image_path)
+    path = settings.resolve_path(case.mask_image_path)
     if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тепловая карта недоступна")
-    return FileResponse(path, media_type="image/jpeg")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Маска сегментации недоступна")
+    return FileResponse(path, media_type="image/png")

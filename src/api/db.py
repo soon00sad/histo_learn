@@ -59,13 +59,16 @@ class Case(Base):
 
     verdict_label: Mapped[str] = mapped_column(String(64))
     is_malignant: Mapped[bool] = mapped_column()
-    confidence: Mapped[float] = mapped_column(Float)
-    malignant_probability: Mapped[float] = mapped_column(Float)
-    benign_probability: Mapped[float] = mapped_column(Float)
+    tumor_area_fraction: Mapped[float] = mapped_column(Float)
+    # JSON {name_en: fraction}, only classes actually present in the mask —
+    # see src/inference/verdict.py / src/api/case_service.py. Segmentation
+    # replaces the old binary malignant_probability/benign_probability pair.
+    class_areas_json: Mapped[str] = mapped_column(Text, default="{}")
 
-    top_regions_json: Mapped[str] = mapped_column(Text, default="[]")
     source_image_path: Mapped[str] = mapped_column(String(1024))
-    heatmap_image_path: Mapped[str] = mapped_column(String(1024))
+    # Lossless indexed PNG (exact per-pixel class IDs), not the old JPEG
+    # heatmap — see case_service.save_mask_png.
+    mask_image_path: Mapped[str] = mapped_column(String(1024))
     report_pdf_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
     ki67: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

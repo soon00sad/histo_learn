@@ -1,8 +1,9 @@
-"""API smoke tests: auth flow + patch analysis + case listing.
+"""API smoke tests: auth flow + patch segmentation + case listing.
 
 Builds an isolated FastAPI app (only the routers under test) backed by a
-temp SQLite DB, with the classifier/GradCAM explainer replaced by fakes —
-so this suite never needs the real model and runs in well under a second.
+temp SQLite DB, with the segmentation model replaced by a fake — so this
+suite never needs the real trained checkpoint (models/segmentation.pth,
+not committed to git) and runs in well under a second.
 """
 from __future__ import annotations
 
@@ -17,32 +18,33 @@ from PIL import Image
 from src.api import db as db_module
 from src.api.deps import settings_dep
 from src.api.routers import analysis, auth, cases, jobs, reports
-from src.inference.classifier import ClassificationResult
+from src.inference.segmenter import SegmentationResult
+from src.utils.bcss_classes import load_bcss_classes
 from src.utils.config import PathsConfig
 
-
-class _FakeClassifier:
-    def __init__(self, class_names: list[str], malignant_name: str):
-        self.class_names = class_names
-        self.malignant_name = malignant_name
-
-    def classify(self, image) -> ClassificationResult:
-        probs = {n: (0.87 if n == self.malignant_name else 0.13) for n in self.class_names}
-        return ClassificationResult(
-            predicted_class=self.class_names.index(self.malignant_name),
-            predicted_label=self.malignant_name,
-            confidence=0.87,
-            probabilities=probs,
-        )
+_PATCH_SIZE = 256
 
 
-class _FakeExplainer:
-    def explain(self, image, target_class):
-        size = 224
-        cam = np.zeros((size, size), dtype=np.float32)
-        cam[50:70, 50:70] = 0.9
-        overlay = np.zeros((size, size, 3), dtype=np.uint8)
-        return cam, overlay
+class _FakeSegmenter:
+    """Returns a mask with a clear tumor block (~15% of the patch, well
+    above the malignant_area_threshold) on a stroma background, so both the
+    verdict and the class-area breakdown have something real to assert on."""
+
+    def __init__(self, taxonomy):
+        self.taxonomy = taxonomy
+
+    def segment(self, image) -> SegmentationResult:
+        tumor_idx = next(c.model_index for c in self.taxonomy.classes if c.name_en == "tumor")
+        stroma_idx = next(c.model_index for c in self.taxonomy.classes if c.name_en == "stroma")
+        mask = np.full((_PATCH_SIZE, _PATCH_SIZE), stroma_idx, dtype=np.uint8)
+        mask[50:150, 50:150] = tumor_idx
+
+        total = mask.size
+        fractions = {
+            "tumor": float((mask == tumor_idx).sum()) / total,
+            "stroma": float((mask == stroma_idx).sum()) / total,
+        }
+        return SegmentationResult(mask=mask, class_pixel_fractions=fractions, mean_confidence=0.9)
 
 
 def _build_test_app(tmp_path, base_settings, monkeypatch):
@@ -57,12 +59,8 @@ def _build_test_app(tmp_path, base_settings, monkeypatch):
     test_settings = base_settings.model_copy(update={"paths": paths})
     db_module.init_db(test_settings)
 
-    malignant_name = test_settings.model.class_names[test_settings.model.malignant_class_index]
-    monkeypatch.setattr(
-        analysis, "get_classifier",
-        lambda: _FakeClassifier(test_settings.model.class_names, malignant_name),
-    )
-    monkeypatch.setattr(analysis, "get_explainer", lambda: _FakeExplainer())
+    taxonomy = load_bcss_classes()
+    monkeypatch.setattr(analysis, "get_segmenter", lambda: _FakeSegmenter(taxonomy))
 
     app = FastAPI()
     for router in (auth.router, analysis.router, jobs.router, cases.router, reports.router):
@@ -103,9 +101,11 @@ def test_login_then_analyze_patch_then_list_cases(tmp_path, settings, monkeypatc
     )
     assert analyze_response.status_code == 200
     body = analyze_response.json()
+    tumor_fraction = 10000 / (_PATCH_SIZE * _PATCH_SIZE)
     assert body["is_malignant"] is True
-    assert body["confidence"] == pytest.approx(0.87)
-    assert len(body["top_regions"]) == 1
+    assert body["tumor_area_fraction"] == pytest.approx(tumor_fraction, abs=1e-4)
+    # sorted by fraction descending — stroma (~85%) covers more area than the tumor block
+    assert [c["name_en"] for c in body["class_areas"]] == ["stroma", "tumor"]
 
     cases_response = client.get("/api/v1/cases", headers=headers)
     assert cases_response.status_code == 200
@@ -157,3 +157,26 @@ def test_case_status_update(tmp_path, settings, monkeypatch):
     )
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "confirmed"
+
+
+def test_case_mask_is_a_lossless_png_not_a_jpeg_heatmap(tmp_path, settings, monkeypatch):
+    """The segmentation path stores/serves a lossless indexed PNG (exact
+    per-pixel class IDs) at /mask, replacing the old JPEG /heatmap
+    endpoint — see case_service.save_mask_png."""
+    app, test_settings = _build_test_app(tmp_path, settings, monkeypatch)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_login(client, test_settings)}"}
+
+    case_id = client.post(
+        "/api/v1/analyze/patch",
+        files={"file": ("patch.png", _png_bytes(), "image/png")},
+        headers=headers,
+    ).json()["case_id"]
+
+    mask_response = client.get(f"/api/v1/cases/{case_id}/mask", headers=headers)
+    assert mask_response.status_code == 200
+    assert mask_response.headers["content-type"] == "image/png"
+
+    loaded = Image.open(io.BytesIO(mask_response.content))
+    assert loaded.mode == "P"
+    assert loaded.size == (_PATCH_SIZE, _PATCH_SIZE)
