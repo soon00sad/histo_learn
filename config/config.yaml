@@ -84,6 +84,17 @@ wsi:
   batch_size: 16
   max_processing_minutes: 15
 
+# WSI tiling for the segmentation model (src/inference/wsi_segmenter.py),
+# feature/segmentation only — `wsi:` above is untouched, still what
+# master's binary classification path uses.
+segmentation_wsi:
+  tile_size: 256
+  tile_stride: 128   # 50% overlap: tiles blend via Hann window, no seams at borders
+  tissue_mask_level_downsample: 32
+  batch_size: 16
+  max_processing_minutes: 15
+  mask_output_downsample: 4   # 1 mask pixel = 4x4 level-0 pixels; full slide-size masks won't fit in memory at level-0 res
+
 paths:
   data_dir: "data"
   uploads_dir: "data/uploads"

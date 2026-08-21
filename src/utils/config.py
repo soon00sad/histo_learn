@@ -99,6 +99,20 @@ class WsiConfig(BaseModel):
     max_processing_minutes: int
 
 
+class SegmentationWsiConfig(BaseModel):
+    """Separate from WsiConfig: segmentation tiles overlap (tile_stride <
+    tile_size, for seam-free Hann-window blending — see
+    src/inference/wsi_segmenter.py), unlike the classifier's non-overlapping
+    tiles. Kept independent so this doesn't affect master's binary path."""
+
+    tile_size: int
+    tile_stride: int
+    tissue_mask_level_downsample: int
+    batch_size: int
+    max_processing_minutes: int
+    mask_output_downsample: float  # level-0 pixels per output-mask pixel
+
+
 class PathsConfig(BaseModel):
     data_dir: str
     uploads_dir: str
@@ -121,6 +135,7 @@ class Settings(BaseModel):
     auth: AuthConfig
     model: ModelConfig
     segmentation_model: SegmentationModelConfig
+    segmentation_wsi: SegmentationWsiConfig
     xai: XaiConfig
     preprocessing: PreprocessingConfig
     wsi: WsiConfig
