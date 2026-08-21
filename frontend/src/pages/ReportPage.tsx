@@ -6,7 +6,7 @@ import type { CaseDetail } from "../api/types";
 export function ReportPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
-  const [heatmapUrl, setHeatmapUrl] = useState<string | null>(null);
+  const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -16,7 +16,7 @@ export function ReportPage() {
       .getCase(caseId)
       .then(async (detail) => {
         setCaseDetail(detail);
-        setHeatmapUrl(await fetchAuthenticatedBlobUrl(api.caseHeatmapUrl(caseId)));
+        setMaskUrl(await fetchAuthenticatedBlobUrl(api.caseMaskUrl(caseId)));
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить случай"));
   }, [caseId]);
@@ -75,27 +75,28 @@ export function ReportPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 22, marginTop: 18 }}>
           <div>
-            <SectionLabel>Изображение препарата с тепловой картой</SectionLabel>
+            <SectionLabel>Изображение препарата с маской сегментации</SectionLabel>
             <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", aspectRatio: "4/3.3", background: "#eee", border: "1px solid var(--hv-border)" }}>
-              {heatmapUrl && <img src={heatmapUrl} alt="Тепловая карта" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              {maskUrl && <img src={maskUrl} alt="Маска сегментации" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <SectionLabel>Топ-{caseDetail.top_regions.length} зоны внимания</SectionLabel>
+              <SectionLabel>Классы тканей</SectionLabel>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--hv-border)" }}>
-                    <th style={thStyle}>#</th>
-                    <th style={thStyle}>Координаты</th>
-                    <th style={{ ...thStyle, textAlign: "right" }}>Значимость</th>
+                    <th style={thStyle}>Класс</th>
+                    <th style={{ ...thStyle, textAlign: "right" }}>Доля площади</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {caseDetail.top_regions.map((r) => (
-                    <tr key={r.rank} style={{ borderBottom: "1px solid var(--hv-border-light)" }}>
-                      <td style={{ padding: "6px 0" }}>{r.rank}</td>
-                      <td>X: {r.x}, Y: {r.y}</td>
-                      <td style={{ textAlign: "right", fontWeight: 700, color: "var(--hv-malignant)" }}>{(r.score * 100).toFixed(1)}%</td>
+                  {caseDetail.class_areas.map((c) => (
+                    <tr key={c.name_en} style={{ borderBottom: "1px solid var(--hv-border-light)" }}>
+                      <td style={{ padding: "6px 0", display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flex: "none" }} />
+                        {c.name_ru}
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{(c.fraction * 100).toFixed(1)}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -110,7 +111,7 @@ export function ReportPage() {
                 {caseDetail.verdict_label}
               </div>
               <div style={{ fontSize: 12, color: "var(--hv-text-muted)", marginTop: 2 }}>
-                уверенность модели <b>{(caseDetail.confidence * 100).toFixed(1)}%</b>
+                доля опухолевой ткани <b>{(caseDetail.tumor_area_fraction * 100).toFixed(1)}%</b>
               </div>
             </div>
 

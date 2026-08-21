@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { TopBar } from "../components/TopBar";
 import { Disclaimer } from "../components/Disclaimer";
-import { VerdictCard, TopZonesCard } from "../components/ResultPanels";
+import { SegmentationViewer } from "../components/SegmentationViewer";
 import { api, ApiError, fetchAuthenticatedBlobUrl } from "../api/client";
 import type { AnalysisResult, IhcMarkersInput } from "../api/types";
 
@@ -25,20 +25,19 @@ export function AnalysisPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [showHeatmap, setShowHeatmap] = useState(true);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [heatmapUrl, setHeatmapUrl] = useState<string | null>(null);
+  const [maskUrl, setMaskUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!result) return;
     let cancelled = false;
     Promise.all([
       fetchAuthenticatedBlobUrl(api.caseImageUrl(result.case_id)),
-      fetchAuthenticatedBlobUrl(api.caseHeatmapUrl(result.case_id)),
-    ]).then(([src, heat]) => {
+      fetchAuthenticatedBlobUrl(api.caseMaskUrl(result.case_id)),
+    ]).then(([src, mask]) => {
       if (cancelled) return;
       setSourceUrl(src);
-      setHeatmapUrl(heat);
+      setMaskUrl(mask);
     });
     return () => {
       cancelled = true;
@@ -121,102 +120,77 @@ export function AnalysisPage() {
         </div>
       </div>
 
-      <div style={{ padding: "28px 48px 16px", display: "grid", gridTemplateColumns: "1.05fr 0.85fr", gap: 28, alignItems: "start" }}>
-        <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 24, boxShadow: "var(--hv-shadow-card)" }}>
-          <UploadRow file={file} onPick={() => fileInputRef.current?.click()} mode={mode} />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={mode === "patch" ? "image/png,image/jpeg" : ".svs,.tif,.tiff,.ndpi,.mrxs,.vms,.vmu,.scn"}
-            style={{ display: "none" }}
-            onChange={(e) => {
-              setResult(null);
-              setFile(e.target.files?.[0] ?? null);
-            }}
-          />
+      <div style={{ padding: "28px 48px 16px", display: result ? "block" : "grid", gridTemplateColumns: result ? undefined : "1.05fr 0.85fr", gap: 28 }}>
+        {!result ? (
+          <>
+            <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 24, boxShadow: "var(--hv-shadow-card)" }}>
+              <UploadRow file={file} onPick={() => fileInputRef.current?.click()} mode={mode} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={mode === "patch" ? "image/png,image/jpeg" : ".svs,.tif,.tiff,.ndpi,.mrxs,.vms,.vmu,.scn"}
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  setResult(null);
+                  setFile(e.target.files?.[0] ?? null);
+                }}
+              />
 
-          {!result ? (
-            <IhcForm
-              ki67={ki67}
-              setKi67={setKi67}
-              erStatus={erStatus}
-              setErStatus={setErStatus}
-              prStatus={prStatus}
-              setPrStatus={setPrStatus}
-              her2={her2}
-              setHer2={setHer2}
-            />
-          ) : (
-            <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "16px 0" }}>
-                <div style={{ fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)" }}>Изображение препарата</div>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <span style={{ fontSize: 12.5, color: "var(--hv-text-muted)", fontWeight: 600 }}>Тепловая карта</span>
-                  <span
-                    onClick={() => setShowHeatmap((v) => !v)}
-                    style={{
-                      width: 38, height: 22, borderRadius: 20, background: "var(--hv-brand-dark)", padding: 2,
-                      display: "flex", alignItems: "center", justifyContent: showHeatmap ? "flex-end" : "flex-start",
-                    }}
-                  >
-                    <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff" }} />
-                  </span>
-                </label>
-              </div>
-              <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", aspectRatio: "4/3.1", background: "#eee" }}>
-                {(showHeatmap ? heatmapUrl : sourceUrl) && (
-                  <img
-                    src={(showHeatmap ? heatmapUrl : sourceUrl)!}
-                    alt="Препарат"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                )}
-              </div>
-            </>
-          )}
+              <IhcForm
+                ki67={ki67}
+                setKi67={setKi67}
+                erStatus={erStatus}
+                setErStatus={setErStatus}
+                prStatus={prStatus}
+                setPrStatus={setPrStatus}
+                her2={her2}
+                setHer2={setHer2}
+              />
 
-          {error && <div style={{ marginTop: 14, fontSize: 13, color: "var(--hv-malignant)", fontWeight: 600 }}>{error}</div>}
+              {error && <div style={{ marginTop: 14, fontSize: 13, color: "var(--hv-malignant)", fontWeight: 600 }}>{error}</div>}
 
-          {!result && (
-            <button
-              onClick={handleAnalyze}
-              disabled={!file || isSubmitting}
-              style={{
-                marginTop: 18, width: "100%", textAlign: "center", border: "none",
-                cursor: file && !isSubmitting ? "pointer" : "default",
-                padding: "14px 22px", borderRadius: 13, background: "var(--hv-brand-gradient)",
-                color: "#fff", fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)",
-                opacity: file && !isSubmitting ? 1 : 0.55,
-              }}
-            >
-              {isSubmitting ? "Анализируем…" : "Анализировать"}
-            </button>
-          )}
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {result ? (
-            <>
-              <VerdictCard result={result} />
-              <TopZonesCard regions={result.top_regions} />
               <button
-                onClick={handleGenerateReport}
+                onClick={handleAnalyze}
+                disabled={!file || isSubmitting}
                 style={{
-                  textAlign: "center", border: "none", cursor: "pointer", padding: "16px 22px",
-                  borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
-                  fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
-                  justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+                  marginTop: 18, width: "100%", textAlign: "center", border: "none",
+                  cursor: file && !isSubmitting ? "pointer" : "default",
+                  padding: "14px 22px", borderRadius: 13, background: "var(--hv-brand-gradient)",
+                  color: "#fff", fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)",
+                  opacity: file && !isSubmitting ? 1 : 0.55,
                 }}
               >
-                Сформировать PDF-отчёт
+                {isSubmitting ? "Анализируем…" : "Анализировать"}
               </button>
-            </>
-          ) : (
-            <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 26, boxShadow: "var(--hv-shadow-card)", color: "var(--hv-text-muted)", fontSize: 13.5 }}>
-              Загрузите изображение препарата и нажмите «Анализировать» — результат появится здесь.
             </div>
-          )}
-        </div>
+
+            <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 26, boxShadow: "var(--hv-shadow-card)", color: "var(--hv-text-muted)", fontSize: 13.5 }}>
+              Загрузите изображение препарата и нажмите «Анализировать» — результат сегментации появится здесь.
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 900 }}>
+            <SegmentationViewer
+              tissueImageUrl={sourceUrl}
+              maskImageUrl={maskUrl}
+              classAreas={result.class_areas}
+              verdictLabel={result.verdict_label}
+              isMalignant={result.is_malignant}
+              tumorAreaFraction={result.tumor_area_fraction}
+            />
+            <button
+              onClick={handleGenerateReport}
+              style={{
+                alignSelf: "flex-start", textAlign: "center", border: "none", cursor: "pointer", padding: "14px 22px",
+                borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
+                fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
+                justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+              }}
+            >
+              Сформировать PDF-отчёт
+            </button>
+          </div>
+        )}
       </div>
 
       <Disclaimer />
@@ -308,4 +282,3 @@ function Select({ label, value, onChange, options }: { label: string; value: str
     </label>
   );
 }
-

@@ -120,7 +120,7 @@ export const api = {
     }),
 
   caseImageUrl: (caseId: string) => `${API_BASE}/cases/${caseId}/image`,
-  caseHeatmapUrl: (caseId: string) => `${API_BASE}/cases/${caseId}/heatmap`,
+  caseMaskUrl: (caseId: string) => `${API_BASE}/cases/${caseId}/mask`,
   caseReportUrl: (caseId: string) => `${API_BASE}/cases/${caseId}/report.pdf`,
 
   generateReport: (caseId: string) =>

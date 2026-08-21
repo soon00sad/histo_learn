@@ -75,7 +75,7 @@ export function HistoryPage() {
             <div>ID случая</div>
             <div>Дата</div>
             <div>Вердикт</div>
-            <div>Уверенность</div>
+            <div>Доля опухоли</div>
             <div>Статус</div>
             <div />
           </div>
@@ -110,7 +110,7 @@ export function HistoryPage() {
                   {c.verdict_label}
                 </span>
               </div>
-              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{(c.confidence * 100).toFixed(1)}%</div>
+              <div style={{ fontSize: 13.5, fontWeight: 700 }}>{(c.tumor_area_fraction * 100).toFixed(1)}%</div>
               <div>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: c.status === "confirmed" ? "var(--hv-benign)" : "var(--hv-pending)" }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.status === "confirmed" ? "var(--hv-benign)" : "var(--hv-pending-dot)" }} />

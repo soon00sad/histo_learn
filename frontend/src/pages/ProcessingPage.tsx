@@ -5,23 +5,20 @@ import type { JobStatusOut } from "../api/types";
 
 const POLL_INTERVAL_MS = 1500;
 
-// The design mock shows 4 illustrative steps in a fixed order; the actual
-// pipeline (src/inference/wsi_aggregator.py) tiles first, then normalizes
-// + classifies each tile together, then builds the heatmap — so the
-// "normalization" stage signal is folded into the middle step here rather
-// than shown as its own row, to stay honest about real execution order.
-const STAGE_RANK: Record<string, number> = { tiling: 0, normalization: 1, inference: 1, heatmap: 2 };
+// Matches the real pipeline stages reported by src/inference/wsi_segmenter.py's
+// on_progress callback: overlapping tiles -> per-tile segmentation -> stitch
+// into one seam-free mask via Hann-window blending (see docs/ALGORITHMS.md).
+const STAGE_RANK: Record<string, number> = { tiling: 0, inference: 1, stitching: 2 };
 const STEPS = [
-  { rank: 0, title: "Нарезка на фрагменты", detail: "Препарат разбивается на фрагменты, фон отсеивается" },
-  { rank: 1, title: "Нормализация окраски и анализ нейросетью", detail: "Каждый фрагмент нормализуется и классифицируется" },
-  { rank: 2, title: "Построение тепловой карты", detail: "Результаты фрагментов собираются в общую карту" },
+  { rank: 0, title: "Нарезка на перекрывающиеся фрагменты", detail: "Препарат разбивается на фрагменты, фон отсеивается" },
+  { rank: 1, title: "Нормализация окраски и сегментация нейросетью", detail: "Каждый фрагмент нормализуется и сегментируется" },
+  { rank: 2, title: "Сборка маски препарата", detail: "Результаты фрагментов сшиваются в общую маску без швов" },
 ];
 
 function overallProgress(job: JobStatusOut): number {
   if (job.status === "done") return 1;
   const rank = STAGE_RANK[job.stage] ?? 0;
-  const local = job.stage === "tiling" || job.stage === "heatmap" ? job.progress : job.stage === "inference" ? job.progress : 0;
-  return Math.min(1, rank / 3 + local / 3);
+  return Math.min(1, rank / 3 + job.progress / 3);
 }
 
 export function ProcessingPage() {

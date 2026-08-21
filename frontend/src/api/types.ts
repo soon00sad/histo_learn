@@ -12,21 +12,19 @@ export interface Token {
   user: UserOut;
 }
 
-export interface RegionOut {
-  rank: number;
-  x: number;
-  y: number;
-  score: number;
+export interface ClassAreaOut {
+  name_en: string;
+  name_ru: string;
+  color: string;
+  fraction: number;
 }
 
 export interface AnalysisResult {
   case_id: string;
   verdict_label: string;
   is_malignant: boolean;
-  confidence: number;
-  malignant_probability: number;
-  benign_probability: number;
-  top_regions: RegionOut[];
+  tumor_area_fraction: number;
+  class_areas: ClassAreaOut[];
   analysis_mode: "patch" | "wsi";
 }
 
@@ -36,16 +34,14 @@ export interface CaseSummary {
   tissue_type: string;
   verdict_label: string;
   is_malignant: boolean;
-  confidence: number;
+  tumor_area_fraction: number;
   status: "pending" | "confirmed";
 }
 
 export interface CaseDetail extends CaseSummary {
   source_filename: string;
   analysis_mode: "patch" | "wsi";
-  malignant_probability: number;
-  benign_probability: number;
-  top_regions: RegionOut[];
+  class_areas: ClassAreaOut[];
   ki67: number | null;
   er_status: string | null;
   pr_status: string | null;

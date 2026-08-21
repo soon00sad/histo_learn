@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { TopBar } from "../components/TopBar";
 import { Disclaimer } from "../components/Disclaimer";
-import { VerdictCard, TopZonesCard } from "../components/ResultPanels";
+import { SegmentationViewer } from "../components/SegmentationViewer";
 import { api, ApiError, fetchAuthenticatedBlobUrl } from "../api/client";
 import type { CaseDetail } from "../api/types";
 
@@ -12,9 +12,8 @@ export function CaseResultPage() {
 
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showHeatmap, setShowHeatmap] = useState(true);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [heatmapUrl, setHeatmapUrl] = useState<string | null>(null);
+  const [maskUrl, setMaskUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!caseId) return;
@@ -22,12 +21,12 @@ export function CaseResultPage() {
       .getCase(caseId)
       .then(async (detail) => {
         setCaseDetail(detail);
-        const [src, heat] = await Promise.all([
+        const [src, mask] = await Promise.all([
           fetchAuthenticatedBlobUrl(api.caseImageUrl(caseId)),
-          fetchAuthenticatedBlobUrl(api.caseHeatmapUrl(caseId)),
+          fetchAuthenticatedBlobUrl(api.caseMaskUrl(caseId)),
         ]);
         setSourceUrl(src);
-        setHeatmapUrl(heat);
+        setMaskUrl(mask);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить случай"));
   }, [caseId]);
@@ -87,49 +86,26 @@ export function CaseResultPage() {
         </button>
       </div>
 
-      <div style={{ padding: "28px 48px 16px", display: "grid", gridTemplateColumns: "1.05fr 0.85fr", gap: 28, alignItems: "start" }}>
-        <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 24, boxShadow: "var(--hv-shadow-card)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)" }}>Изображение препарата</div>
-            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-              <span style={{ fontSize: 12.5, color: "var(--hv-text-muted)", fontWeight: 600 }}>Тепловая карта</span>
-              <span
-                onClick={() => setShowHeatmap((v) => !v)}
-                style={{
-                  width: 38, height: 22, borderRadius: 20, background: "var(--hv-brand-dark)", padding: 2,
-                  display: "flex", alignItems: "center", justifyContent: showHeatmap ? "flex-end" : "flex-start",
-                }}
-              >
-                <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff" }} />
-              </span>
-            </label>
-          </div>
-          <div style={{ position: "relative", borderRadius: 14, overflow: "hidden", aspectRatio: "4/3.1", background: "#eee" }}>
-            {(showHeatmap ? heatmapUrl : sourceUrl) && (
-              <img
-                src={(showHeatmap ? heatmapUrl : sourceUrl)!}
-                alt="Препарат"
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <VerdictCard result={caseDetail} />
-          <TopZonesCard regions={caseDetail.top_regions} />
-          <button
-            onClick={() => navigate(`/cases/${caseDetail.id}/report`)}
-            style={{
-              textAlign: "center", border: "none", cursor: "pointer", padding: "16px 22px",
-              borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
-              fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
-              justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
-            }}
-          >
-            {caseDetail.report_available ? "Открыть PDF-отчёт" : "Сформировать PDF-отчёт"}
-          </button>
-        </div>
+      <div style={{ padding: "28px 48px 16px", display: "flex", flexDirection: "column", gap: 18, maxWidth: 900 }}>
+        <SegmentationViewer
+          tissueImageUrl={sourceUrl}
+          maskImageUrl={maskUrl}
+          classAreas={caseDetail.class_areas}
+          verdictLabel={caseDetail.verdict_label}
+          isMalignant={caseDetail.is_malignant}
+          tumorAreaFraction={caseDetail.tumor_area_fraction}
+        />
+        <button
+          onClick={() => navigate(`/cases/${caseDetail.id}/report`)}
+          style={{
+            alignSelf: "flex-start", textAlign: "center", border: "none", cursor: "pointer", padding: "14px 22px",
+            borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
+            fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
+            justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+          }}
+        >
+          {caseDetail.report_available ? "Открыть PDF-отчёт" : "Сформировать PDF-отчёт"}
+        </button>
       </div>
 
       <Disclaimer />
