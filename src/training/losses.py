@@ -31,15 +31,27 @@ class WeightedCeDiceLoss(nn.Module):
         return (1 - self.dice_weight) * self.ce(logits, target) + self.dice_weight * self.dice(logits, target)
 
 
-def compute_class_weights(class_pixel_counts: torch.Tensor) -> torch.Tensor:
+def compute_class_weights(class_pixel_counts: torch.Tensor, max_imbalance_ratio: float = 50.0) -> torch.Tensor:
     """Inverse-frequency class weights, normalized so the mean weight is 1.
 
     `class_pixel_counts` is a `[num_classes]` tensor of total pixel counts
     per class across the training set (see `metrics.count_class_pixels`).
     Classes absent from the sampled set get clamped to a count of 1 so they
     don't produce an infinite weight.
+
+    BCSS's real class frequencies are extremely long-tailed (tumor/stroma
+    outnumber nerve/blood_vessel by orders of magnitude) — uncapped inverse
+    frequency would hand the rarest class a weight thousands of times the
+    most common one, which in practice destabilizes training (the loss
+    becomes dominated by a handful of rare-class pixels, gradients spike)
+    rather than actually improving rare-class recall. Counts are floored at
+    `max(counts) / max_imbalance_ratio` before inverting, capping the
+    heaviest weight at `max_imbalance_ratio` times the lightest — still
+    strongly favors rare classes, just not without bound.
     """
     counts = class_pixel_counts.float().clamp(min=1)
+    floor = counts.max() / max_imbalance_ratio
+    counts = counts.clamp(min=floor)
     weights = 1.0 / counts
     weights = weights * (weights.numel() / weights.sum())
     return weights

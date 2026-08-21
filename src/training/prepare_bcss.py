@@ -21,26 +21,41 @@ Three subcommands:
               matching filenames, which is the layout BCSS's own official
               download scripts produce) into the split layout above.
 
+  download-official  Full download straight from BCSS's own authoritative
+              source: RGB regions via the Girder REST API on the
+              HistomicsTK demo server (the same server the dataset's own
+              PathologyDataScience/BCSS repo downloads from), masks via
+              their public Figshare links. No Google Drive involved, so
+              no per-file daily quota — this is the recommended way to
+              get the full 151-region dataset. Resumable: already-
+              downloaded pairs on disk are skipped on a re-run.
+
   download    Best-effort full download of the official BCSS Google Drive
-              folder via `gdown`, then reorganize like from-source. This
-              pulls the WHOLE dataset (multi-GB) — intended to run on a
-              GPU/cloud machine that will also do the real training, not
-              this project's low-RAM/no-GPU dev machine. Not exercised in
-              CI; treat network failures as expected and retry manually.
+              *mirror* folder via `gdown`, then reorganize like
+              from-source. Kept as a fallback if the Girder server above
+              is ever unreachable, but hits Google Drive's per-file daily
+              download quota on a full-dataset pull — prefer
+              download-official. Not exercised in CI; treat network
+              failures as expected and retry manually.
 
 Usage:
     python -m src.training.prepare_bcss synthetic --out data/bcss --count 8
     python -m src.training.prepare_bcss from-source --source-dir /path/to/bcss --out data/bcss
+    python -m src.training.prepare_bcss download-official --out data/bcss
     python -m src.training.prepare_bcss download --out data/bcss --limit 40
 """
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import random
 import shutil
 from pathlib import Path
 
+import cv2
 import numpy as np
+import requests
 from PIL import Image, ImageDraw
 
 from src.utils.bcss_classes import load_bcss_classes
@@ -51,6 +66,24 @@ logger = get_logger(__name__)
 BCSS_DRIVE_FOLDER_URL = (
     "https://drive.google.com/drive/folders/1zqbdkQF8i5cEmZOGmbdQm-EP8dRYtvss"
 )
+
+# Official BCSS source, per PathologyDataScience/BCSS's own
+# download_crowdsource_dataset.py + configs.py: RGB regions come from a
+# Girder REST API on Kitware's public HistomicsTK demo server; masks come
+# from public, unauthenticated Figshare links listed in meta/roiBounds.csv.
+# Neither has Google Drive's per-file daily quota, which is what made the
+# gdown-based `download` command below unreliable for a full-dataset pull.
+#
+# HISTOMICSTK_API_KEY is the read-only API key published in that repo's own
+# configs.py for exactly this purpose (scripted access to this public
+# dataset's folder) — not a secret, and not associated with this project.
+HISTOMICSTK_API_URL = "https://demo.kitware.com/histomicstk/api/v1/"
+HISTOMICSTK_API_KEY = "n0Kp1ez8YOnOiWNoACryzeBlIzbUDW3iOD2DmPLI"
+HISTOMICSTK_SOURCE_FOLDER_ID = "5bbdeba3e629140048d017bb"
+ROI_BOUNDS_CSV_URL = (
+    "https://raw.githubusercontent.com/PathologyDataScience/BCSS/master/meta/roiBounds.csv"
+)
+ROI_MPP = 0.25  # matches the official script's default (standardized 40x Aperio scan)
 
 
 def _write_split(out_dir: Path, ids: list[str], val_fraction: float, seed: int = 0) -> None:
@@ -195,6 +228,100 @@ def pair_masks_and_images(all_files, limit: int | None = None) -> dict[str, tupl
     return {sample_id: (images[sample_id], masks[sample_id]) for sample_id in common_ids}
 
 
+def fetch_roi_bounds() -> list[dict[str, str]]:
+    """Fetch and parse meta/roiBounds.csv — one row per BCSS region: slide
+    id, pixel bounding box (level-0), and a direct Figshare link to its
+    mask. Kept as its own function so tests can monkeypatch just the
+    network call, not the parsing logic."""
+    resp = requests.get(ROI_BOUNDS_CSV_URL, timeout=30)
+    resp.raise_for_status()
+    return list(csv.DictReader(io.StringIO(resp.text)))
+
+
+def cmd_download_official(out: Path, limit: int | None, val_fraction: float, seed: int) -> None:
+    """Full BCSS download from the dataset's own authoritative source — see
+    the HISTOMICSTK_* / ROI_BOUNDS_CSV_URL module constants above for why
+    this avoids Google Drive's quota. Resumable: a region whose image+mask
+    pair already exists on disk (from an earlier, possibly interrupted run)
+    is skipped, so re-running only fetches what's still missing.
+    """
+    import girder_client  # heavy/optional — only needed for this command
+
+    images_dir, masks_dir = out / "images", out / "masks"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    rows = fetch_roi_bounds()
+    if limit:
+        rows = rows[:limit]
+    logger.info("Fetched BCSS ROI list: %d regions total.", len(rows))
+
+    gc = girder_client.GirderClient(apiUrl=HISTOMICSTK_API_URL)
+    gc.authenticate(apiKey=HISTOMICSTK_API_KEY)
+    items = gc.get(f"item?folderId={HISTOMICSTK_SOURCE_FOLDER_ID}&limit=1000000")
+    item_id_by_slide = {item["name"][:12]: item["_id"] for item in items}
+    logger.info("Indexed %d slides on the HistomicsTK server.", len(item_id_by_slide))
+
+    ids: list[str] = []
+    failed: list[str] = []
+    for i, row in enumerate(rows):
+        slide_full_id = row[""]
+        slide_short = slide_full_id[:12]
+        xmin, ymin, xmax, ymax = (int(float(row[k])) for k in ("xmin", "ymin", "xmax", "ymax"))
+        sample_id = f"{slide_full_id}_xmin{xmin}_ymin{ymin}"
+        image_path, mask_path = images_dir / f"{sample_id}.png", masks_dir / f"{sample_id}.png"
+
+        if image_path.exists() and mask_path.exists():
+            ids.append(sample_id)
+            continue  # resumable: already fetched in an earlier (possibly interrupted) run
+
+        item_id = item_id_by_slide.get(slide_short)
+        if item_id is None:
+            logger.warning("Skipping %s: slide not found in HistomicsTK folder listing.", sample_id)
+            failed.append(sample_id)
+            continue
+
+        try:
+            mm = 0.001 * ROI_MPP
+            region_resp = gc.get(
+                f"item/{item_id}/tiles/region?left={xmin}&right={xmax}&top={ymin}&bottom={ymax}"
+                f"&mm_x={mm:.4f}&mm_y={mm:.4f}",
+                jsonResp=False,
+            )
+            rgb = Image.open(io.BytesIO(region_resp.content)).convert("RGB")
+
+            mask_resp = requests.get(row["mask_link"], timeout=60)
+            mask_resp.raise_for_status()
+            mask = np.array(Image.open(io.BytesIO(mask_resp.content)))
+            if mask.shape[:2] != (rgb.height, rgb.width):
+                # The mask is served at whatever resolution Figshare has it at, not
+                # necessarily the same as the MPP-0.25 RGB region above — nearest-
+                # neighbor resize (not bilinear/area) is required to keep exact
+                # per-pixel class codes intact, matching the official script.
+                mask = cv2.resize(mask, (rgb.width, rgb.height), interpolation=cv2.INTER_NEAREST)
+
+            rgb.save(image_path)
+            Image.fromarray(mask.astype(np.uint8)).save(mask_path)
+            ids.append(sample_id)
+        except Exception as exc:
+            logger.warning("Skipping %s: download failed (%s)", sample_id, exc)
+            failed.append(sample_id)
+
+        if (i + 1) % 20 == 0 or (i + 1) == len(rows):
+            logger.info("Progress: %d/%d regions processed (%d ok, %d failed so far).",
+                        i + 1, len(rows), len(ids), len(failed))
+
+    logger.info("Downloaded %d/%d region pairs (%d failed).", len(ids), len(rows), len(failed))
+    if failed:
+        preview = ", ".join(failed[:20]) + (", ..." if len(failed) > 20 else "")
+        logger.warning("Failed regions (re-run this command to retry only what's missing): %s", preview)
+    if not ids:
+        raise RuntimeError("All regions failed to download — see warnings above.")
+
+    _write_split(out, ids, val_fraction, seed)
+    logger.info("Prepared %d real BCSS samples (official source) into %s", len(ids), out)
+
+
 def cmd_download(out: Path, limit: int | None, val_fraction: float, seed: int) -> None:
     """Best-effort: not exercised on this dev machine (see module docstring).
 
@@ -277,7 +404,13 @@ def main() -> None:
     p_src.add_argument("--val-fraction", type=float, default=0.15)
     p_src.add_argument("--seed", type=int, default=0)
 
-    p_dl = sub.add_parser("download", help="Full BCSS download via gdown (run on the training machine).")
+    p_dlo = sub.add_parser("download-official", help="Full BCSS download via Girder+Figshare (recommended, no quota).")
+    p_dlo.add_argument("--out", type=Path, default=Path("data/bcss"))
+    p_dlo.add_argument("--limit", type=int, default=None, help="Cap number of regions fetched (omit for all 151).")
+    p_dlo.add_argument("--val-fraction", type=float, default=0.15)
+    p_dlo.add_argument("--seed", type=int, default=0)
+
+    p_dl = sub.add_parser("download", help="Full BCSS download via gdown (fallback; hits Google Drive's quota).")
     p_dl.add_argument("--out", type=Path, default=Path("data/bcss"))
     p_dl.add_argument("--limit", type=int, default=None, help="Cap number of files fetched (omit for the full dataset).")
     p_dl.add_argument("--val-fraction", type=float, default=0.15)
@@ -288,6 +421,8 @@ def main() -> None:
         cmd_synthetic(args.out, args.count, args.region_size, args.val_fraction, args.seed)
     elif args.command == "from-source":
         cmd_from_source(args.source_dir, args.out, args.val_fraction, args.seed)
+    elif args.command == "download-official":
+        cmd_download_official(args.out, args.limit, args.val_fraction, args.seed)
     elif args.command == "download":
         cmd_download(args.out, args.limit, args.val_fraction, args.seed)
 

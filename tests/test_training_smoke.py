@@ -10,17 +10,20 @@ not that the model is accurate — see docs/MODEL.md for that distinction.
 """
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader
 
 from src.training import prepare_bcss
 from src.training.dataset import BcssDataset, IGNORE_INDEX, list_samples, remap_mask
 from src.training.losses import WeightedCeDiceLoss, compute_class_weights
 from src.training.metrics import ConfusionMatrix, count_class_pixels
+from src.training import train as train_module
 from src.training.train import build_model, evaluate, train_one_epoch
 from src.utils.bcss_classes import load_bcss_classes
 
@@ -70,6 +73,17 @@ def test_compute_class_weights_favors_rare_classes():
     weights = compute_class_weights(counts)
     assert weights[1] > weights[0]  # rarer class gets a bigger weight
     assert weights.mean().item() == pytest.approx(1.0, abs=1e-4)
+
+
+def test_compute_class_weights_caps_extreme_imbalance():
+    """BCSS-scale imbalance (tumor/stroma vs. nerve/blood_vessel) can be
+    orders of magnitude — uncapped inverse frequency would let a
+    near-absent class dominate the loss. The heaviest weight must stay
+    within max_imbalance_ratio of the lightest, not grow unbounded."""
+    counts = torch.tensor([1_000_000, 5])  # 200,000x raw imbalance
+    weights = compute_class_weights(counts, max_imbalance_ratio=50.0)
+    assert weights.max().item() / weights.min().item() == pytest.approx(50.0, rel=1e-3)
+    assert weights[1] > weights[0]  # still favors the rare class, just bounded
 
 
 def _fake_drive_entry(path: str) -> SimpleNamespace:
@@ -168,6 +182,96 @@ def test_cmd_download_skips_failed_pairs_and_keeps_successful_ones(tmp_path, mon
     assert all_ids == {"sample-0", "sample-2"}  # sample-1's simulated failure excluded it, not fatal
 
 
+def _fake_roi_row(index: int) -> dict:
+    return {
+        "": f"TCGA-XX-{index:04d}-DX1",
+        "xmin": "0", "ymin": "0", "xmax": "8", "ymax": "8",
+        "mask_link": f"https://example.invalid/mask-{index}",
+    }
+
+
+def _fake_mask_response(class_index: int = 2):
+    mask = np.full((8, 8), class_index, dtype=np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(mask).save(buf, format="PNG")
+    return SimpleNamespace(content=buf.getvalue(), raise_for_status=lambda: None)
+
+
+def test_cmd_download_official_skips_one_failed_region_and_keeps_the_rest(tmp_path, monkeypatch):
+    """Mirrors test_cmd_download_skips_failed_pairs_and_keeps_successful_ones,
+    but for the Girder+Figshare download path (prepare_bcss.cmd_download_official)
+    that replaces gdown/Google-Drive as the recommended full-dataset source —
+    a single region's Girder tile request failing must not abort the run."""
+    import girder_client
+
+    out = tmp_path / "bcss"
+    rows = [_fake_roi_row(i) for i in range(3)]
+    monkeypatch.setattr(prepare_bcss, "fetch_roi_bounds", lambda: rows)
+
+    class FakeGirderClient:
+        def __init__(self, apiUrl):
+            self.apiUrl = apiUrl
+
+        def authenticate(self, apiKey):
+            pass
+
+        def get(self, path, jsonResp=True):
+            if path.startswith("item?"):
+                return [{"name": row[""] + "-01Z-00-DX1.svs", "_id": f"id-{row['']}"} for row in rows]
+            if "id-TCGA-XX-0001" in path:
+                raise RuntimeError("simulated Girder region failure")
+            buf = io.BytesIO()
+            Image.new("RGB", (8, 8), color=(200, 180, 190)).save(buf, format="PNG")
+            return SimpleNamespace(content=buf.getvalue())
+
+    monkeypatch.setattr(girder_client, "GirderClient", FakeGirderClient)
+    monkeypatch.setattr(prepare_bcss.requests, "get", lambda url, timeout=60: _fake_mask_response())
+
+    prepare_bcss.cmd_download_official(out, limit=None, val_fraction=0.5, seed=0)
+
+    all_ids = {s.id for s in list_samples(out, "train") + list_samples(out, "val")}
+    assert all_ids == {"TCGA-XX-0000-DX1_xmin0_ymin0", "TCGA-XX-0002-DX1_xmin0_ymin0"}
+
+
+def test_cmd_download_official_does_not_redownload_existing_pairs(tmp_path, monkeypatch):
+    """Resumability: a region already fully downloaded from an earlier
+    (possibly interrupted) run must be skipped, not re-fetched — critical
+    for a free-tier Colab session that can drop mid-download."""
+    import girder_client
+
+    out = tmp_path / "bcss"
+    rows = [_fake_roi_row(0)]
+    monkeypatch.setattr(prepare_bcss, "fetch_roi_bounds", lambda: rows)
+
+    (out / "images").mkdir(parents=True)
+    (out / "masks").mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(out / "images" / "TCGA-XX-0000-DX1_xmin0_ymin0.png")
+    Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(out / "masks" / "TCGA-XX-0000-DX1_xmin0_ymin0.png")
+
+    def must_not_be_called(*args, **kwargs):
+        raise AssertionError("should not hit the network for an already-downloaded pair")
+
+    class FakeGirderClient:
+        def __init__(self, apiUrl):
+            pass
+
+        def authenticate(self, apiKey):
+            pass
+
+        def get(self, path, jsonResp=True):
+            if path.startswith("item?"):
+                return [{"name": rows[0][""] + "-01Z-00-DX1.svs", "_id": "id-0"}]
+            return must_not_be_called()
+
+    monkeypatch.setattr(girder_client, "GirderClient", FakeGirderClient)
+    monkeypatch.setattr(prepare_bcss.requests, "get", must_not_be_called)
+
+    prepare_bcss.cmd_download_official(out, limit=None, val_fraction=0.5, seed=0)
+
+    all_ids = {s.id for s in list_samples(out, "train") + list_samples(out, "val")}
+    assert all_ids == {"TCGA-XX-0000-DX1_xmin0_ymin0"}
+
+
 def test_prepare_bcss_synthetic_layout(tmp_path):
     out = tmp_path / "bcss_smoke"
     prepare_bcss.cmd_synthetic(out, count=4, region_size=96, val_fraction=0.5, seed=1)
@@ -229,3 +333,83 @@ def test_training_pipeline_runs_end_to_end(tmp_path):
     # Loading the checkpoint back into a fresh model of the same shape must work.
     reloaded = build_model("resnet18", taxonomy.num_classes, encoder_weights=None)
     reloaded.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
+
+
+def test_train_main_resumes_from_interrupted_run(tmp_path, monkeypatch):
+    """Simulates a Colab session dropping partway through: run main() for 2
+    epochs with --resume-path set, then run it again "cold" (as a fresh
+    process would after a disconnect) with a higher --epochs cap. The
+    second run must pick up at epoch 3, not restart training from epoch 1 —
+    that's the whole point of --resume-path for a free-tier GPU that can
+    disconnect at any time."""
+    import sys
+
+    data_dir = tmp_path / "bcss_smoke"
+    prepare_bcss.cmd_synthetic(data_dir, count=6, region_size=96, val_fraction=0.34, seed=3)
+
+    out = tmp_path / "checkpoint.pth"
+    resume_path = tmp_path / "resume.pt"
+    history_jsonl = tmp_path / "history.jsonl"
+
+    base_argv = [
+        "train.py",
+        "--data-dir", str(data_dir),
+        "--out", str(out),
+        "--crop-size", "64",
+        "--batch-size", "2",
+        "--device", "cpu",
+        "--resume-path", str(resume_path),
+        "--history-jsonl", str(history_jsonl),
+        "--min-epochs", "100",  # disable early stopping for this test
+    ]
+
+    monkeypatch.setattr(sys, "argv", base_argv + ["--epochs", "2"])
+    train_module.main()
+
+    assert resume_path.exists()
+    first_state = torch.load(resume_path, map_location="cpu")
+    assert first_state["epoch"] == 2
+    assert len(first_state["history"]) == 2
+    lines_after_first_run = history_jsonl.read_text(encoding="utf-8").splitlines()
+    assert len(lines_after_first_run) == 2
+
+    # "Fresh process" run: same resume-path already has state on disk from above.
+    monkeypatch.setattr(sys, "argv", base_argv + ["--epochs", "4"])
+    train_module.main()
+
+    second_state = torch.load(resume_path, map_location="cpu")
+    assert second_state["epoch"] == 4
+    assert len(second_state["history"]) == 4
+    assert [h["epoch"] for h in second_state["history"]] == [1, 2, 3, 4]
+    lines_after_second_run = history_jsonl.read_text(encoding="utf-8").splitlines()
+    assert len(lines_after_second_run) == 4  # appended, not overwritten
+
+
+def test_train_main_early_stops_on_plateau(tmp_path, monkeypatch):
+    """With --patience set low and an untrained model on a tiny synthetic
+    dataset (mIoU won't meaningfully improve epoch to epoch), training must
+    stop well before the --epochs hard cap."""
+    import sys
+
+    data_dir = tmp_path / "bcss_smoke"
+    prepare_bcss.cmd_synthetic(data_dir, count=6, region_size=96, val_fraction=0.34, seed=4)
+
+    out = tmp_path / "checkpoint.pth"
+    history_jsonl = tmp_path / "history.jsonl"
+
+    monkeypatch.setattr(sys, "argv", [
+        "train.py",
+        "--data-dir", str(data_dir),
+        "--out", str(out),
+        "--crop-size", "64",
+        "--batch-size", "2",
+        "--device", "cpu",
+        "--history-jsonl", str(history_jsonl),
+        "--epochs", "50",
+        "--min-epochs", "1",
+        "--patience", "1",
+    ])
+    train_module.main()
+
+    lines = history_jsonl.read_text(encoding="utf-8").splitlines()
+    assert 1 <= len(lines) < 50  # stopped well short of the hard cap
