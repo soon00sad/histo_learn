@@ -15,7 +15,7 @@ from PIL import Image
 from src.api.db import Case
 from src.api.schemas import CaseDetail, CaseSummary, ClassAreaOut
 from src.inference.wsi_segmenter import UNCOVERED
-from src.report.pdf_report import ReportData
+from src.report.pdf_report import ReportClassArea, ReportData
 from src.utils.bcss_classes import BcssTaxonomy, load_bcss_classes
 from src.utils.config import Settings
 
@@ -107,18 +107,10 @@ def case_to_detail(case: Case) -> CaseDetail:
 
 
 def build_report_data(case: Case, settings: Settings, doctor_name: str) -> ReportData:
-    """Interim adapter: maps the segmentation Case schema onto pdf_report.py's
-    still-binary-shaped ReportData (top_regions + malignant/benign
-    probability bars) so the PDF keeps generating correctly without a
-    crash. Redesigning the PDF's own layout (mask image, N-class area
-    breakdown) is a separate later phase, not this one — see the approved
-    plan; treat this mapping as a deliberate stopgap, not the final shape.
-    tumor_area_fraction stands in for both "malignant_probability" and
-    "confidence" (when malignant) since segmentation has no single
-    predicted-class probability the way the old classifier did.
-    """
-    tumor_fraction = case.tumor_area_fraction
-    confidence = tumor_fraction if case.is_malignant else 1.0 - tumor_fraction
+    class_areas = [
+        ReportClassArea(name_ru=c.name_ru, color=c.color, fraction=c.fraction)
+        for c in json_to_class_areas(case.class_areas_json)
+    ]
 
     return ReportData(
         case_id=case.id,
@@ -128,11 +120,10 @@ def build_report_data(case: Case, settings: Settings, doctor_name: str) -> Repor
         analysis_mode="Полный препарат" if case.analysis_mode == "wsi" else "Живой анализ",
         verdict_label=case.verdict_label,
         is_malignant=case.is_malignant,
-        confidence=confidence,
-        malignant_probability=tumor_fraction,
-        benign_probability=1.0 - tumor_fraction,
-        top_regions=[],  # GradCAM boxes don't apply to segmentation — the mask itself is the explanation
-        heatmap_image_path=settings.resolve_path(case.mask_image_path),
+        tumor_area_fraction=case.tumor_area_fraction,
+        class_areas=class_areas,
+        source_image_path=settings.resolve_path(case.source_image_path),
+        mask_image_path=settings.resolve_path(case.mask_image_path),
         disclaimer=settings.app.disclaimer,
         model_version=settings.app.version,
         generated_at=dt.datetime.utcnow().strftime("%d.%m.%Y, %H:%M"),

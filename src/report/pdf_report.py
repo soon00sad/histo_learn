@@ -1,14 +1,15 @@
 """PDF report generation (ReportLab), mirroring the "Отчёт" design layout:
-branded header, slide + heatmap image, top attention zones, model verdict,
-SPPR disclaimer, case metadata, and physician signature fields.
+branded header, slide with the segmentation mask overlaid, tissue-class
+area breakdown, model verdict, SPPR disclaimer, case metadata, and
+physician signature fields.
 """
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
-from reportlab.lib import colors
+from PIL import Image, ImageChops, UnidentifiedImageError
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle
@@ -29,6 +30,14 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
+
+# Printed class breakdown is capped — a real result can carry all 16 BCSS
+# classes (config/bcss_classes.yaml), most with a near-zero share; the web
+# UI (SegmentationViewer.tsx) has room to list everything, a one-page PDF
+# doesn't. The remainder is folded into a single summary line instead of
+# silently dropped.
+_MAX_CLASSES_SHOWN = 8
+
 
 # ReportLab's built-in base-14 fonts ("Helvetica" etc.) only cover Latin
 # WinAnsiEncoding — every Cyrillic character in this report (labels,
@@ -87,11 +96,10 @@ _PANEL_BG = HexColor("#F7F7FA")
 
 
 @dataclass(frozen=True)
-class ReportRegion:
-    rank: int
-    x: int
-    y: int
-    score: float
+class ReportClassArea:
+    name_ru: str
+    color: str  # "#RRGGBB", from config/bcss_classes.yaml via src/utils/bcss_classes.py
+    fraction: float
 
 
 @dataclass(frozen=True)
@@ -103,11 +111,10 @@ class ReportData:
     analysis_mode: str  # "Живой анализ" | "Полный препарат"
     verdict_label: str  # e.g. "Злокачественная" / "Доброкачественная"
     is_malignant: bool
-    confidence: float
-    malignant_probability: float
-    benign_probability: float
-    top_regions: list[ReportRegion]
-    heatmap_image_path: Path
+    tumor_area_fraction: float
+    class_areas: list[ReportClassArea]  # sorted descending by fraction
+    source_image_path: Path
+    mask_image_path: Path
     disclaimer: str
     model_version: str
     generated_at: str
@@ -151,6 +158,46 @@ def _is_readable_image(path: Path) -> bool:
         return False
 
 
+def _composite_mask_overlay(source_path: Path, mask_path: Path, opacity: float = 0.55) -> Image.Image | None:
+    """Blend the segmentation mask over the source tissue image — mirrors
+    the frontend's mix-blend-mode:multiply overlay
+    (SegmentationViewer.tsx), so the printed report shows the same "mask
+    on tissue" view instead of the mask in isolation. The mask is resized
+    to the source's pixel size first: for a WSI case the two are saved at
+    different resolutions (thumbnail vs. mask_output_downsample — see
+    src/inference/wsi_segmenter.py) even though they cover the same
+    extent, and for a patch case the mask is fixed at the model's
+    input_size while the source keeps its original upload resolution.
+
+    Returns None only if the source itself is missing/unreadable (nothing
+    to show); if the mask is missing/unreadable, falls back to the plain
+    source image rather than failing the whole report.
+    """
+    if not (source_path.exists() and _is_readable_image(source_path)):
+        return None
+    source = Image.open(source_path).convert("RGB")
+
+    if not (mask_path.exists() and _is_readable_image(mask_path)):
+        return source
+
+    mask = Image.open(mask_path).convert("RGBA").resize(source.size, Image.NEAREST)
+    mask_rgb = mask.convert("RGB")
+    # UNCOVERED pixels (wsi_segmenter.UNCOVERED) are fully transparent in the
+    # mask's own palette (see case_service.save_mask_png's tRNS chunk) — respect
+    # that per-pixel alpha, on top of an overall opacity so tissue detail stays
+    # visible under classified regions too.
+    alpha = mask.split()[3].point(lambda a: int(a * opacity))
+    multiplied = ImageChops.multiply(source, mask_rgb)
+    return Image.composite(multiplied, source, alpha)
+
+
+def _rl_image_from_pil(image: Image.Image, width: float, height: float) -> RLImage:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return RLImage(buffer, width=width, height=height)
+
+
 def _build_header(data: ReportData, styles: dict) -> Table:
     logo_path = data.logo_path or _DEFAULT_LOGO_PATH
     logo_cell = (
@@ -177,30 +224,41 @@ def _build_header(data: ReportData, styles: dict) -> Table:
 
 
 def _build_left_column(data: ReportData, styles: dict) -> list:
-    elements = [Paragraph("ИЗОБРАЖЕНИЕ ПРЕПАРАТА С ТЕПЛОВОЙ КАРТОЙ", styles["label"])]
-    if data.heatmap_image_path.exists() and _is_readable_image(data.heatmap_image_path):
-        elements.append(RLImage(str(data.heatmap_image_path), width=3.35 * inch, height=2.7 * inch))
+    elements = [Paragraph("ИЗОБРАЖЕНИЕ ПРЕПАРАТА С МАСКОЙ СЕГМЕНТАЦИИ", styles["label"])]
+    overlay = _composite_mask_overlay(data.source_image_path, data.mask_image_path)
+    if overlay is not None:
+        elements.append(_rl_image_from_pil(overlay, width=3.35 * inch, height=2.7 * inch))
     elements.append(Spacer(1, 10))
-    elements.append(Paragraph("ТОП-3 ЗОНЫ ВНИМАНИЯ", styles["label"]))
+    elements.append(Paragraph("КЛАССЫ ТКАНЕЙ", styles["label"]))
 
-    rows = [["#", "Координаты", "Значимость"]]
-    for region in data.top_regions:
-        rows.append([str(region.rank), f"X: {region.x}, Y: {region.y}", f"{region.score:.1%}"])
-    zones_table = Table(rows, colWidths=[0.3 * inch, 1.9 * inch, 1.15 * inch])
-    zones_table.setStyle(TableStyle([
+    shown = data.class_areas[:_MAX_CLASSES_SHOWN]
+    rest = data.class_areas[_MAX_CLASSES_SHOWN:]
+
+    rows = [["Класс", "Доля площади"]]
+    for c in shown:
+        label = Paragraph(f'<font color="{c.color}">●</font>&nbsp;&nbsp;{c.name_ru}', styles["table_cell"])
+        rows.append([label, f"{c.fraction:.1%}"])
+    classes_table = Table(rows, colWidths=[2.2 * inch, 1.15 * inch])
+    classes_table.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), _FONT_BOLD),
-        ("FONTNAME", (0, 1), (-1, -1), _FONT),
+        ("FONTNAME", (1, 1), (1, -1), _FONT_BOLD),
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
         ("TEXTCOLOR", (0, 0), (-1, 0), _MUTED_TEXT),
-        ("TEXTCOLOR", (-1, 1), (-1, -1), _MALIGNANT_COLOR),
-        ("FONTNAME", (-1, 1), (-1, -1), _FONT_BOLD),
-        ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("LINEBELOW", (0, 0), (-1, 0), 0.75, _BORDER),
         ("LINEBELOW", (0, 1), (-1, -2), 0.5, _BORDER),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    elements.append(zones_table)
+    elements.append(classes_table)
+
+    if rest:
+        rest_fraction = sum(c.fraction for c in rest)
+        elements.append(Spacer(1, 4))
+        elements.append(Paragraph(
+            f"прочие классы (ещё {len(rest)}): суммарно {rest_fraction:.1%}", styles["small"]
+        ))
     return elements
 
 
@@ -211,11 +269,7 @@ def _build_verdict_panel(data: ReportData, styles: dict) -> Table:
     content = [
         Paragraph("ВЕРДИКТ МОДЕЛИ", styles["label"]),
         Paragraph(data.verdict_label, verdict_style),
-        Paragraph(f"уверенность модели <b>{data.confidence:.1%}</b>", styles["verdict_sub"]),
-        Spacer(1, 8),
-        _probability_bar("Злокачественная", data.malignant_probability, _MALIGNANT_COLOR, styles),
-        Spacer(1, 4),
-        _probability_bar("Доброкачественная", data.benign_probability, _BENIGN_COLOR, styles),
+        Paragraph(f"доля опухолевой ткани <b>{data.tumor_area_fraction:.1%}</b>", styles["verdict_sub"]),
     ]
     panel = Table([[content]], colWidths=[3.35 * inch])
     panel.setStyle(TableStyle([
@@ -227,44 +281,6 @@ def _build_verdict_panel(data: ReportData, styles: dict) -> Table:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
     ]))
     return panel
-
-
-def _probability_bar(label: str, value: float, color: HexColor, styles: dict) -> Table:
-    label_row = Table(
-        [[Paragraph(label, styles["small"]), Paragraph(f"<b>{value:.1%}</b>", styles["small"])]],
-        colWidths=[2.3 * inch, 1.0 * inch],
-    )
-    label_row.setStyle(TableStyle([
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
-
-    bar_width = 3.3 * inch
-    filled = max(bar_width * min(max(value, 0.0), 1.0), 2)
-    bar = Table([[""]], colWidths=[filled], rowHeights=[5])
-    bar.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), color),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    track = Table([[bar]], colWidths=[bar_width], rowHeights=[5])
-    track.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#E7E8EE")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
-    wrapper = Table([[label_row], [track]], colWidths=[3.3 * inch])
-    wrapper.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    return wrapper
 
 
 def _build_right_column(data: ReportData, styles: dict) -> list:
