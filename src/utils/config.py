@@ -59,6 +59,15 @@ class ModelConfig(BaseModel):
     metrics_summary: str
 
 
+class SegmentationVerdictConfig(BaseModel):
+    """Verdict derivation from tissue-class-area fractions
+    (src/inference/verdict.py) — shared by patch- and WSI-level segmentation
+    results, both of which expose the same class-fractions shape."""
+
+    malignant_class_names: list[str]
+    malignant_area_threshold: float
+
+
 class SegmentationModelConfig(BaseModel):
     """DeepLabV3+ segmentation model (src/inference/segmenter.py). Class
     count/names/colors come from config/bcss_classes.yaml, not here —
@@ -136,6 +145,7 @@ class Settings(BaseModel):
     model: ModelConfig
     segmentation_model: SegmentationModelConfig
     segmentation_wsi: SegmentationWsiConfig
+    segmentation_verdict: SegmentationVerdictConfig
     xai: XaiConfig
     preprocessing: PreprocessingConfig
     wsi: WsiConfig

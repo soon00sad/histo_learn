@@ -27,6 +27,7 @@ import torch
 from PIL import Image
 
 from src.inference.segmenter import PatchSegmenter
+from src.inference.verdict import SegmentationVerdict, derive_verdict
 from src.preprocessing.stain_normalization import normalize as macenko_normalize
 from src.utils.bcss_classes import BcssTaxonomy, load_bcss_classes
 from src.utils.config import Settings, get_settings
@@ -56,6 +57,7 @@ class WsiSegmentationResult:
     mask: np.ndarray  # [canvas_h, canvas_w] uint8, 0-based model class indices, or UNCOVERED (255)
     mask_downsample: float  # level-0 pixels per canvas pixel
     class_area_fractions: dict[str, float]  # name_en -> fraction of *tissue-covered* canvas area
+    verdict: SegmentationVerdict
     thumbnail: Image.Image
     tiles_total: int
     tiles_analyzed: int
@@ -205,11 +207,13 @@ def analyze_wsi_segmentation(
 
         on_progress("stitching", 0.0, "Сборка маски препарата из фрагментов")
         mask, fractions = mask_from_accumulators(prob_accum, weight_accum, taxonomy)
+        verdict = derive_verdict(fractions, settings, taxonomy)
         on_progress("stitching", 1.0, "Маска препарата готова")
 
     return WsiSegmentationResult(
         mask=mask,
         mask_downsample=float(downsample),
+        verdict=verdict,
         class_area_fractions=fractions,
         thumbnail=thumbnail,
         tiles_total=tiles_total,

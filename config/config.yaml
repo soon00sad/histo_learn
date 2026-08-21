@@ -62,6 +62,17 @@ segmentation_model:
   # before this string can quote a real mIoU.
   metrics_summary: "Dataset: BCSS (частичная выборка) · mIoU: не подтверждён, требуется повторная валидация"
 
+# Verdict derivation from tissue-class-area fractions (src/inference/verdict.py).
+# angioinvasion is already folded into "tumor" in config/bcss_classes.yaml, so
+# just tumor+dcis here. Threshold is deliberately low (1% of tissue-covered
+# area, not "majority class") — a small invasive/DCIS focus in an otherwise
+# benign field is still diagnostically significant, matching how a
+# pathologist scans (mirrors the binary path's top-decile-of-tiles logic in
+# wsi_aggregator.py, which is driven by the same principle).
+segmentation_verdict:
+  malignant_class_names: ["tumor", "dcis"]
+  malignant_area_threshold: 0.01
+
 xai:
   top_k_regions: 3
   region_threshold_ratio: 0.5
