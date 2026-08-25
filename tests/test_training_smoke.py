@@ -30,6 +30,44 @@ from src.utils.bcss_classes import load_bcss_classes
 import numpy as np
 
 
+def test_stain_normalize_runs_on_the_crop_not_the_full_region(tmp_path, monkeypatch):
+    """Regression test for a real ~10-hour "hung" Colab run: BcssDataset used
+    to run Macenko normalization on the full BCSS region (up to ~11800px
+    per side) before cropping to crop_size, instead of after. Macenko's
+    cost scales with pixel count (~10s for 4500x4500 vs ~0.04s for 256x256
+    measured on this machine), so with that ordering every __getitem__ call
+    on every sample of every epoch paid a many-seconds-per-image tax with
+    zero progress logging — indistinguishable from a hang. This pins the
+    fix: normalize() must see an image no larger than crop_size."""
+    from src.training import dataset as dataset_module
+
+    seen_sizes = []
+    real_normalize = dataset_module.macenko_normalize
+
+    def spy_normalize(image, reference):
+        seen_sizes.append(image.size)  # PIL .size is (width, height)
+        return real_normalize(image, reference)
+
+    monkeypatch.setattr(dataset_module, "macenko_normalize", spy_normalize)
+
+    out = tmp_path / "bcss_smoke"
+    prepare_bcss.cmd_synthetic(out, count=2, region_size=800, val_fraction=0.5, seed=0)
+    taxonomy = load_bcss_classes()
+    samples = list_samples(out, "train") + list_samples(out, "val")
+
+    crop_size = 96
+    ds = BcssDataset(samples, taxonomy, crop_size=crop_size, augment=False, stain_normalize=True)
+    for i in range(len(ds)):
+        ds[i]
+
+    assert seen_sizes, "macenko_normalize was never called"
+    for width, height in seen_sizes:
+        assert width <= crop_size and height <= crop_size, (
+            f"macenko_normalize saw a {width}x{height} image — should be cropped to "
+            f"{crop_size}x{crop_size} (or smaller, at the sample's own resolution) first"
+        )
+
+
 def test_remap_mask_maps_merged_raw_codes_to_same_class():
     taxonomy = load_bcss_classes()
     raw = np.array([[1, 19], [2, 0]], dtype=np.uint8)  # tumor, angioinvasion, stroma, outside_roi

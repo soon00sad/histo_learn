@@ -6,9 +6,14 @@ would bias small batches) rather than computed fresh each time.
 """
 from __future__ import annotations
 
+import time
+
 import torch
 
 from src.training.dataset import IGNORE_INDEX
+from src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class ConfusionMatrix:
@@ -45,10 +50,29 @@ class ConfusionMatrix:
         self.matrix.zero_()
 
 
-def count_class_pixels(dataset, num_classes: int, ignore_index: int = IGNORE_INDEX) -> torch.Tensor:
-    """Total per-class pixel counts across a dataset, for `losses.compute_class_weights`."""
+def count_class_pixels(
+    dataset, num_classes: int, ignore_index: int = IGNORE_INDEX, log_every: int = 0
+) -> torch.Tensor:
+    """Total per-class pixel counts across a dataset, for `losses.compute_class_weights`.
+
+    This does one full, single-threaded pass over `dataset` (each `__getitem__`
+    call decodes an image, remaps its mask, and — if the dataset has
+    stain_normalize enabled — runs Macenko normalization) *before* any
+    training epoch starts, with no other visible activity in between. On a
+    real BCSS pull that took over a minute per sample without `log_every`
+    set, which is indistinguishable from a hang. `log_every=0` (default)
+    keeps this silent, matching prior behavior, for callers (e.g. tests)
+    that don't want log noise.
+    """
     counts = torch.zeros(num_classes, dtype=torch.int64)
-    for _, mask in dataset:
+    total = len(dataset)
+    start = time.time()
+    for i, (_, mask) in enumerate(dataset):
         valid = mask[mask != ignore_index]
         counts += torch.bincount(valid.reshape(-1), minlength=num_classes)[:num_classes]
+        if log_every and ((i + 1) % log_every == 0 or (i + 1) == total):
+            logger.info(
+                "  Class histogram scan: %d/%d samples (%.1fs elapsed)",
+                i + 1, total, time.time() - start,
+            )
     return counts

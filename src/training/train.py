@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import time
 from pathlib import Path
 
 import segmentation_models_pytorch as smp
@@ -58,10 +59,21 @@ def build_model(encoder_name: str, num_classes: int, encoder_weights: str | None
     return smp.DeepLabV3Plus(encoder_name=encoder_name, encoder_weights=encoder_weights, in_channels=3, classes=num_classes)
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device) -> float:
+def train_one_epoch(
+    model, loader, criterion, optimizer, device,
+    *, epoch: int = 1, total_epochs: int = 1, log_every: int = 1,
+) -> float:
+    """`log_every` batches get a progress line (loss, seconds/batch, elapsed
+    epoch time) — a silent per-epoch loop with no feedback until the whole
+    epoch finishes is exactly what made a real ~10-hour Colab run
+    indistinguishable from a hang (see docs/MODEL.md). `log_every=0`
+    disables this, for callers (e.g. tests) that don't want log noise."""
     model.train()
     total_loss, n_batches = 0.0, 0
-    for images, masks in loader:
+    n_total_batches = len(loader)
+    epoch_start = time.time()
+    for batch_idx, (images, masks) in enumerate(loader, start=1):
+        batch_start = time.time()
         images, masks = images.to(device), masks.to(device)
         optimizer.zero_grad()
         logits = model(images)
@@ -70,6 +82,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device) -> float:
         optimizer.step()
         total_loss += loss.item()
         n_batches += 1
+
+        if log_every and (batch_idx % log_every == 0 or batch_idx == n_total_batches):
+            logger.info(
+                "  Epoch %d/%d — batch %d/%d — loss %.4f (running avg %.4f) — "
+                "%.2fs/batch — %.1fs elapsed this epoch",
+                epoch, total_epochs, batch_idx, n_total_batches,
+                loss.item(), total_loss / n_batches,
+                time.time() - batch_start, time.time() - epoch_start,
+            )
     return total_loss / max(1, n_batches)
 
 
@@ -144,6 +165,13 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument(
+        "--log-every-batches", type=int, default=1,
+        help="Log progress every N batches (0 disables per-batch logging). Default logs every "
+             "batch — with no visible progress between epochs, a slow run and a hung one look "
+             "identical, which is what made a real ~10-hour Colab run indistinguishable from a "
+             "genuine hang (see docs/MODEL.md).",
+    )
+    parser.add_argument(
         "--resume-path", type=Path, default=None,
         help="Full training state (weights+optimizer+epoch+history), saved every epoch and reloaded "
              "from here on restart if it exists. Point this at a Drive-mounted path in Colab so a "
@@ -177,15 +205,25 @@ def main() -> None:
     logger.info("Loaded %d train / %d val samples from %s", len(train_samples), len(val_samples), args.data_dir)
 
     train_ds = BcssDataset(train_samples, taxonomy, args.crop_size, augment=not args.no_augment, stain_normalize=args.stain_normalize)
-    # Validation always uses the un-augmented, un-stain-normalized path: metrics
-    # should reflect the raw model, not preprocessing choices under test.
-    val_ds = BcssDataset(val_samples, taxonomy, args.crop_size, augment=False, stain_normalize=False) if val_samples else None
+    # Validation never augments (crop/flip/rotation/color-jitter are training-only
+    # noise), but DOES mirror --stain-normalize: real WSI inference always runs
+    # Macenko on every tile (preprocessing.stain_normalization_enabled=true in
+    # config.yaml, unconditional — see src/inference/wsi_segmenter.py), so if
+    # training passes --stain-normalize but validation skips it, val mIoU would
+    # be measuring the model against a preprocessing distribution it will never
+    # actually see at inference time — an unreliable signal for which epoch's
+    # checkpoint is genuinely best for deployment.
+    val_ds = BcssDataset(val_samples, taxonomy, args.crop_size, augment=False, stain_normalize=args.stain_normalize) if val_samples else None
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=len(train_ds) > args.batch_size)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers) if val_ds else None
 
-    logger.info("Scanning training set for class pixel counts...")
-    counts = count_class_pixels(train_ds, taxonomy.num_classes)
+    logger.info(
+        "Scanning training set for class pixel counts (%d samples, stain_normalize=%s — "
+        "this is a one-time pass before training starts, not an epoch)...",
+        len(train_ds), args.stain_normalize,
+    )
+    counts = count_class_pixels(train_ds, taxonomy.num_classes, log_every=max(1, len(train_ds) // 10))
     log_class_histogram(counts, taxonomy)
 
     class_weights = None
@@ -217,17 +255,30 @@ def main() -> None:
         )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Starting training: %d train batches / %d val batches per epoch, epoch %d..%d.",
+        len(train_loader), len(val_loader) if val_loader is not None else 0, start_epoch, args.epochs,
+    )
     for epoch in range(start_epoch, args.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        logger.info("Epoch %d/%d — train loss %.4f", epoch, args.epochs, train_loss)
-        record = {"epoch": epoch, "train_loss": train_loss}
+        epoch_start = time.time()
+        train_loss = train_one_epoch(
+            model, train_loader, criterion, optimizer, device,
+            epoch=epoch, total_epochs=args.epochs, log_every=args.log_every_batches,
+        )
+        train_time = time.time() - epoch_start
+        logger.info("Epoch %d/%d — train loss %.4f — %.1fs", epoch, args.epochs, train_loss, train_time)
+        record = {"epoch": epoch, "train_loss": train_loss, "train_seconds": round(train_time, 1)}
 
         if val_loader is not None:
+            eval_start = time.time()
             cm = evaluate(model, val_loader, taxonomy.num_classes, device)
             miou = cm.mean_iou()
             c_miou = clinical_mean_iou(cm, taxonomy)
             record.update({"val_miou": miou, "val_clinical_miou": c_miou})
-            logger.info("Epoch %d — val mIoU %.4f (clinical-subset mIoU %.4f)", epoch, miou, c_miou)
+            logger.info(
+                "Epoch %d — val mIoU %.4f (clinical-subset mIoU %.4f) — %.1fs",
+                epoch, miou, c_miou, time.time() - eval_start,
+            )
 
             if miou > best_miou:
                 best_miou = miou

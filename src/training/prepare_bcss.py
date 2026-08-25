@@ -63,6 +63,12 @@ from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# BCSS regions run up to ~11800x11200px (132M pixels, seen on a live
+# download) — past Pillow's default 89M-pixel DecompressionBombWarning
+# threshold, which exists to flag untrusted uploads, not a dataset we're
+# downloading from its own official source.
+Image.MAX_IMAGE_PIXELS = None
+
 BCSS_DRIVE_FOLDER_URL = (
     "https://drive.google.com/drive/folders/1zqbdkQF8i5cEmZOGmbdQm-EP8dRYtvss"
 )
