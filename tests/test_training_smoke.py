@@ -310,6 +310,47 @@ def test_cmd_download_official_does_not_redownload_existing_pairs(tmp_path, monk
     assert all_ids == {"TCGA-XX-0000-DX1_xmin0_ymin0"}
 
 
+def test_cmd_download_official_sample_ids_filters_to_exact_regions(tmp_path, monkeypatch):
+    """scripts/seed_demo_cases.py needs to fetch a specific handful of
+    regions on a fresh machine, not the full 151 — --sample-ids must
+    restrict fetching to exactly the requested ids and reject unknown ones
+    up front rather than silently returning fewer regions than asked."""
+    import girder_client
+
+    out = tmp_path / "bcss"
+    rows = [_fake_roi_row(i) for i in range(3)]
+    monkeypatch.setattr(prepare_bcss, "fetch_roi_bounds", lambda: rows)
+
+    class FakeGirderClient:
+        def __init__(self, apiUrl):
+            pass
+
+        def authenticate(self, apiKey):
+            pass
+
+        def get(self, path, jsonResp=True):
+            if path.startswith("item?"):
+                return [{"name": row[""] + "-01Z-00-DX1.svs", "_id": f"id-{row['']}"} for row in rows]
+            buf = io.BytesIO()
+            Image.new("RGB", (8, 8), color=(200, 180, 190)).save(buf, format="PNG")
+            return SimpleNamespace(content=buf.getvalue())
+
+    monkeypatch.setattr(girder_client, "GirderClient", FakeGirderClient)
+    monkeypatch.setattr(prepare_bcss.requests, "get", lambda url, timeout=60: _fake_mask_response())
+
+    prepare_bcss.cmd_download_official(
+        out, limit=None, val_fraction=0.5, seed=0, sample_ids={"TCGA-XX-0001-DX1"}
+    )
+
+    all_ids = {s.id for s in list_samples(out, "train") + list_samples(out, "val")}
+    assert all_ids == {"TCGA-XX-0001-DX1_xmin0_ymin0"}
+
+    with pytest.raises(ValueError, match="not found"):
+        prepare_bcss.cmd_download_official(
+            out, limit=None, val_fraction=0.5, seed=0, sample_ids={"does-not-exist"}
+        )
+
+
 def test_prepare_bcss_synthetic_layout(tmp_path):
     out = tmp_path / "bcss_smoke"
     prepare_bcss.cmd_synthetic(out, count=4, region_size=96, val_fraction=0.5, seed=1)

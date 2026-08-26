@@ -244,12 +244,20 @@ def fetch_roi_bounds() -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(resp.text)))
 
 
-def cmd_download_official(out: Path, limit: int | None, val_fraction: float, seed: int) -> None:
+def cmd_download_official(
+    out: Path, limit: int | None, val_fraction: float, seed: int,
+    sample_ids: set[str] | None = None,
+) -> None:
     """Full BCSS download from the dataset's own authoritative source — see
     the HISTOMICSTK_* / ROI_BOUNDS_CSV_URL module constants above for why
     this avoids Google Drive's quota. Resumable: a region whose image+mask
     pair already exists on disk (from an earlier, possibly interrupted run)
     is skipped, so re-running only fetches what's still missing.
+
+    `sample_ids`, when given, restricts the fetch to those exact region ids
+    (the roiBounds.csv "" column, e.g. "TCGA-A1-A0SK-DX1") — used by
+    scripts/seed_demo_cases.py to pull just the handful of regions a demo
+    needs on a fresh machine, instead of the full 151-region dataset.
     """
     import girder_client  # heavy/optional — only needed for this command
 
@@ -258,6 +266,11 @@ def cmd_download_official(out: Path, limit: int | None, val_fraction: float, see
     masks_dir.mkdir(parents=True, exist_ok=True)
 
     rows = fetch_roi_bounds()
+    if sample_ids:
+        rows = [row for row in rows if row[""] in sample_ids]
+        missing = sample_ids - {row[""] for row in rows}
+        if missing:
+            raise ValueError(f"Requested sample id(s) not found in the official ROI list: {sorted(missing)}")
     if limit:
         rows = rows[:limit]
     logger.info("Fetched BCSS ROI list: %d regions total.", len(rows))
@@ -413,6 +426,11 @@ def main() -> None:
     p_dlo = sub.add_parser("download-official", help="Full BCSS download via Girder+Figshare (recommended, no quota).")
     p_dlo.add_argument("--out", type=Path, default=Path("data/bcss"))
     p_dlo.add_argument("--limit", type=int, default=None, help="Cap number of regions fetched (omit for all 151).")
+    p_dlo.add_argument(
+        "--sample-ids", type=str, default=None,
+        help="Comma-separated exact region ids (roiBounds.csv's '' column, e.g. TCGA-A1-A0SK-DX1) "
+             "to fetch just those regions instead of the full dataset.",
+    )
     p_dlo.add_argument("--val-fraction", type=float, default=0.15)
     p_dlo.add_argument("--seed", type=int, default=0)
 
@@ -428,7 +446,8 @@ def main() -> None:
     elif args.command == "from-source":
         cmd_from_source(args.source_dir, args.out, args.val_fraction, args.seed)
     elif args.command == "download-official":
-        cmd_download_official(args.out, args.limit, args.val_fraction, args.seed)
+        sample_ids = set(args.sample_ids.split(",")) if args.sample_ids else None
+        cmd_download_official(args.out, args.limit, args.val_fraction, args.seed, sample_ids=sample_ids)
     elif args.command == "download":
         cmd_download(args.out, args.limit, args.val_fraction, args.seed)
 

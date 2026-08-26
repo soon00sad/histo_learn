@@ -1,0 +1,41 @@
+# Exhibition demo cases: seeded by scripts/seed_demo_cases.py from BCSS's
+# own pathologist-annotated ground-truth masks — standing in for real model
+# inference while the segmentation model is still undertrained (see
+# docs/MODEL.md). The rest of the pipeline (mask storage, area-fraction
+# aggregation, verdict derivation, PDF report, doctor review) is the real,
+# unchanged product code — only the mask's *source* is swapped, and that
+# swap is driven entirely by this file plus Case.mask_source, never
+# hardcoded per-case in application code.
+#
+# bcss_row_id is the exact id from BCSS's own meta/roiBounds.csv (the ""
+# column) — see src/training/prepare_bcss.py's ROI_BOUNDS_CSV_URL. Chosen
+# from a 25-region scouting sample for combined class richness: together
+# these three cover tumor, stroma, necrosis, lymphocytic infiltrate, and
+# normal ducts/acini, not just tumor+stroma.
+#
+# case_id uses an "HV-DEMO-NN" pattern (not the normal "HV-YYYY-NNNNN"
+# auto-generated scheme) so demo cases are visually distinguishable in the
+# case list by id alone, on top of the "reference data" badge.
+
+cases:
+  - case_id: "HV-DEMO-01"
+    bcss_row_id: "TCGA-A7-A0CE-DX1"
+    tissue_type: "Молочная железа, биопсия"
+    display_note: >
+      Инвазивная карцинома с очагами некроза и лимфоцитарной
+      инфильтрацией — самый разнообразный по составу тканей из трёх
+      демо-случаев (7 классов).
+
+  - case_id: "HV-DEMO-02"
+    bcss_row_id: "TCGA-A2-A1G6-DX1"
+    tissue_type: "Молочная железа, биопсия"
+    display_note: >
+      Карцинома на фоне выраженной лимфоцитарной инфильтрации, с
+      сохранными нормальными протоками/ацинусами рядом с опухолью.
+
+  - case_id: "HV-DEMO-03"
+    bcss_row_id: "TCGA-A2-A04P-DX1"
+    tissue_type: "Молочная железа, биопсия"
+    display_note: >
+      Карцинома с сопоставимыми долями некроза и лимфоцитарной
+      инфильтрации — хороший контраст с HV-DEMO-01 по составу.

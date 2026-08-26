@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { ClassAreaOut } from "../api/types";
 
 /**
@@ -117,10 +117,26 @@ export function SegmentationViewer({
       setDragging(false);
     }
   };
-  const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+  // Scroll-to-zoom needs e.preventDefault() so the page doesn't scroll behind
+  // the viewer while zooming — but React attaches onWheel as a passive
+  // listener, where preventDefault() is silently ignored (logs a console
+  // warning, does nothing). A native listener registered with
+  // {passive: false} is the only way to actually block page scroll here.
+  // The ref-to-latest-closure indirection lets the effect register the
+  // listener once instead of re-attaching on every zoom/pan change.
+  const onWheelRef = useRef<(e: WheelEvent) => void>(() => {});
+  onWheelRef.current = (e: WheelEvent) => {
     e.preventDefault();
     setZoom(zoom + (e.deltaY < 0 ? 0.25 : -0.25));
   };
+
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => onWheelRef.current(e);
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [tissueImageUrl]);
 
   const zoomLabel = zoom.toFixed(1).replace(/\.0$/, "") + "×";
   const verdictColor = isMalignant ? "var(--hv-malignant)" : "var(--hv-benign)";
@@ -177,7 +193,6 @@ export function SegmentationViewer({
               onPointerMove={onMove}
               onPointerUp={onUp}
               onPointerLeave={onUp}
-              onWheel={onWheel}
               style={{
                 position: "absolute", inset: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
                 touchAction: "none", cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "default",
