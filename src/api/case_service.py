@@ -88,6 +88,7 @@ def case_to_summary(case: Case) -> CaseSummary:
         is_malignant=case.is_malignant,
         tumor_area_fraction=case.tumor_area_fraction,
         status=case.status.value,
+        mask_source=case.mask_source,
     )
 
 
@@ -129,4 +130,5 @@ def build_report_data(case: Case, settings: Settings, doctor_name: str) -> Repor
         generated_at=dt.datetime.utcnow().strftime("%d.%m.%Y, %H:%M"),
         doctor_name=doctor_name,
         logo_path=None,
+        mask_source=case.mask_source,
     )

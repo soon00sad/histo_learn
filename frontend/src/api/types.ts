@@ -35,7 +35,8 @@ export interface CaseSummary {
   verdict_label: string;
   is_malignant: boolean;
   tumor_area_fraction: number;
-  status: "pending" | "confirmed";
+  status: "pending" | "confirmed" | "rejected";
+  mask_source: "model" | "bcss_ground_truth";
 }
 
 export interface CaseDetail extends CaseSummary {
@@ -47,6 +48,12 @@ export interface CaseDetail extends CaseSummary {
   pr_status: string | null;
   her2_status: string | null;
   report_available: boolean;
+}
+
+export interface CaseReviewInput {
+  agreed: boolean;
+  comment?: string;
+  corrected_verdict_label?: string;
 }
 
 export interface JobStatusOut {

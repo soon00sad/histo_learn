@@ -159,6 +159,80 @@ def test_case_status_update(tmp_path, settings, monkeypatch):
     assert update_response.json()["status"] == "confirmed"
 
 
+def test_case_review_agree_confirms_and_disagree_rejects_with_a_record(tmp_path, settings, monkeypatch):
+    app, test_settings = _build_test_app(tmp_path, settings, monkeypatch)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_login(client, test_settings)}"}
+
+    case_id = client.post(
+        "/api/v1/analyze/patch",
+        files={"file": ("patch.png", _png_bytes(), "image/png")},
+        headers=headers,
+    ).json()["case_id"]
+
+    agree_response = client.post(
+        f"/api/v1/cases/{case_id}/review", json={"agreed": True}, headers=headers
+    )
+    assert agree_response.status_code == 200
+    assert agree_response.json()["status"] == "confirmed"
+
+    disagree_response = client.post(
+        f"/api/v1/cases/{case_id}/review",
+        json={"agreed": False, "comment": "Недостаточно ткани", "corrected_verdict_label": "Доброкачественная"},
+        headers=headers,
+    )
+    assert disagree_response.status_code == 200
+    assert disagree_response.json()["status"] == "rejected"
+
+    # Both reviews are kept (not overwritten) — see db.CaseReview's docstring.
+    with db_module.session_scope() as session:
+        reviews = session.query(db_module.CaseReview).filter_by(case_id=case_id).order_by(db_module.CaseReview.id).all()
+    assert len(reviews) == 2
+    assert reviews[0].agreed is True and reviews[0].corrected_verdict_label is None
+    assert reviews[1].agreed is False
+    assert reviews[1].comment == "Недостаточно ткани"
+    assert reviews[1].corrected_verdict_label == "Доброкачественная"
+    assert reviews[1].system_verdict_label == agree_response.json()["verdict_label"]
+
+
+def test_list_cases_default_priority_sort_ranks_malignant_first(tmp_path, settings, monkeypatch):
+    """Regardless of upload order, a malignant case should rank above a
+    benign one in the default (priority) sort — this is the worklist
+    ordering doctors see, not just recency."""
+    app, test_settings = _build_test_app(tmp_path, settings, monkeypatch)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_login(client, test_settings)}"}
+
+    taxonomy = load_bcss_classes()
+
+    class _BenignSegmenter(_FakeSegmenter):
+        def segment(self, image):
+            stroma_idx = next(c.model_index for c in self.taxonomy.classes if c.name_en == "stroma")
+            mask = np.full((_PATCH_SIZE, _PATCH_SIZE), stroma_idx, dtype=np.uint8)
+            return SegmentationResult(mask=mask, class_pixel_fractions={"stroma": 1.0}, mean_confidence=0.9)
+
+    # Upload the malignant case FIRST and benign SECOND, so a plain recency
+    # sort would put the benign one on top — the opposite of what priority
+    # sort should do, making the two behaviors actually distinguishable.
+    monkeypatch.setattr(analysis, "get_segmenter", lambda: _FakeSegmenter(taxonomy))
+    malignant_id = client.post(
+        "/api/v1/analyze/patch", files={"file": ("patch.png", _png_bytes(), "image/png")}, headers=headers
+    ).json()["case_id"]
+
+    monkeypatch.setattr(analysis, "get_segmenter", lambda: _BenignSegmenter(taxonomy))
+    benign_id = client.post(
+        "/api/v1/analyze/patch", files={"file": ("patch.png", _png_bytes(), "image/png")}, headers=headers
+    ).json()["case_id"]
+
+    response = client.get("/api/v1/cases", headers=headers)  # default sort=priority
+    ids_in_order = [c["id"] for c in response.json()]
+    assert ids_in_order == [malignant_id, benign_id]
+
+    date_response = client.get("/api/v1/cases", params={"sort": "date"}, headers=headers)
+    date_ids_in_order = [c["id"] for c in date_response.json()]
+    assert date_ids_in_order == [benign_id, malignant_id]  # benign was uploaded more recently
+
+
 def test_case_mask_is_a_lossless_png_not_a_jpeg_heatmap(tmp_path, settings, monkeypatch):
     """The segmentation path stores/serves a lossless indexed PNG (exact
     per-pixel class IDs) at /mask, replacing the old JPEG /heatmap

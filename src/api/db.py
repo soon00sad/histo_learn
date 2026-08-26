@@ -26,6 +26,7 @@ class Base(DeclarativeBase):
 class CaseStatus(str, enum.Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
+    REJECTED = "rejected"
 
 
 class JobStatus(str, enum.Enum):
@@ -71,12 +72,44 @@ class Case(Base):
     mask_image_path: Mapped[str] = mapped_column(String(1024))
     report_pdf_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
+    # "model" (real segmentation output) vs "bcss_ground_truth" (pathologist-
+    # annotated reference mask, used for exhibition demo cases seeded by
+    # scripts/seed_demo_cases.py while the model is still undertrained — see
+    # docs/MODEL.md). Never hardcoded per-case in application code; the
+    # frontend shows a reference-data badge whenever this isn't "model".
+    mask_source: Mapped[str] = mapped_column(String(32), default="model")
+
     ki67: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     er_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     pr_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     her2_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     status: Mapped[CaseStatus] = mapped_column(Enum(CaseStatus), default=CaseStatus.PENDING)
+
+
+class CaseReview(Base):
+    """A doctor's agree/disagree decision on a case's system-generated
+    verdict. Written once per review action (a case can be reviewed more
+    than once if reopened), kept even after Case.status changes again, so
+    the history isn't lost. Disagreements (agreed=False) are the intended
+    seed for future retraining data — this table only *collects* them;
+    nothing here triggers retraining automatically.
+    """
+    __tablename__ = "case_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id"), index=True)
+    doctor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow)
+
+    agreed: Mapped[bool] = mapped_column()
+    # System's verdict/tumor fraction at review time — kept alongside the
+    # doctor's correction so a later retraining pass doesn't need to guess
+    # what the model originally predicted from the (possibly since-changed) Case row.
+    system_verdict_label: Mapped[str] = mapped_column(String(64))
+    system_tumor_area_fraction: Mapped[float] = mapped_column(Float)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    corrected_verdict_label: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
 class Job(Base):

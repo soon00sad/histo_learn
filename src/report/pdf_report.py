@@ -120,6 +120,11 @@ class ReportData:
     generated_at: str
     doctor_name: str
     logo_path: Path | None = None
+    # "model" (real segmentation output) vs "bcss_ground_truth" (pathologist-
+    # annotated reference mask — exhibition demo cases while the model is
+    # still undertrained, see docs/MODEL.md). Printed prominently so a demo
+    # report is never mistaken for a real model result.
+    mask_source: str = "model"
 
 
 def _styles() -> dict[str, ParagraphStyle]:
@@ -142,6 +147,8 @@ def _styles() -> dict[str, ParagraphStyle]:
                                  textColor=_MUTED_TEXT, leading=11),
         "table_cell": ParagraphStyle("table_cell", fontName=_FONT, fontSize=9,
                                       textColor=_DARK_TEXT),
+        "reference_badge": ParagraphStyle("reference_badge", fontName=_FONT_BOLD, fontSize=8.5,
+                                           textColor=_BRAND_PRIMARY, alignment=2, leading=11),
     }
 
 
@@ -210,6 +217,8 @@ def _build_header(data: ReportData, styles: dict) -> Table:
         Paragraph("Заключение по анализу препарата", styles["doc_title"]),
         Paragraph(f"Случай {data.case_id} · {data.created_at}", styles["doc_meta"]),
     ]
+    if data.mask_source != "model":
+        meta.append(Paragraph("ПРИМЕР НА ЭТАЛОННЫХ ДАННЫХ BCSS — НЕ ВЫВОД МОДЕЛИ", styles["reference_badge"]))
     header = Table([[logo_cell, meta]], colWidths=[3.2 * inch, 4.0 * inch])
     header.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

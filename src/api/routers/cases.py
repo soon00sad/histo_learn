@@ -8,9 +8,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from src.api.case_service import case_to_detail, case_to_summary
-from src.api.db import Case, CaseStatus, User
+from src.api.db import Case, CaseReview, CaseStatus, User
 from src.api.deps import current_user, db_session, settings_dep
-from src.api.schemas import CaseDetail, CaseStatusUpdate, CaseSummary
+from src.api.schemas import CaseDetail, CaseReviewRequest, CaseStatusUpdate, CaseSummary
 from src.utils.config import Settings
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -28,6 +28,7 @@ def list_cases(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     verdict: Optional[str] = Query(default=None, description="malignant | benign"),
     search: Optional[str] = Query(default=None, description="Поиск по ID случая"),
+    sort: str = Query(default="priority", description="priority | date"),
     session: Session = Depends(db_session),
     _user: User = Depends(current_user),
 ) -> list[CaseSummary]:
@@ -41,7 +42,16 @@ def list_cases(
     if search:
         query = query.filter(Case.id.ilike(f"%{search}%"))
 
-    cases = query.order_by(Case.created_at.desc()).all()
+    if sort == "priority":
+        # Malignant-verdict cases first, ranked by tumor-area fraction within
+        # that group — mirrors how a worklist should surface the cases most
+        # likely to need urgent attention, not just the most recently
+        # uploaded. Ties broken by recency.
+        query = query.order_by(Case.is_malignant.desc(), Case.tumor_area_fraction.desc(), Case.created_at.desc())
+    else:
+        query = query.order_by(Case.created_at.desc())
+
+    cases = query.all()
     return [case_to_summary(c) for c in cases]
 
 
@@ -65,8 +75,39 @@ def update_case_status(
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Статус должен быть 'pending' или 'confirmed'",
+            detail="Статус должен быть 'pending', 'confirmed' или 'rejected'",
         ) from exc
+    session.commit()
+    return case_to_summary(case)
+
+
+@router.post("/{case_id}/review", response_model=CaseSummary)
+def review_case(
+    case_id: str,
+    payload: CaseReviewRequest,
+    session: Session = Depends(db_session),
+    user: User = Depends(current_user),
+) -> CaseSummary:
+    """Doctor agrees or disagrees with the system's verdict. Agreeing marks
+    the case confirmed (same effect as PATCH status=confirmed); disagreeing
+    marks it rejected AND writes a CaseReview row recording what the system
+    said vs. what the doctor thinks — this is the collection point for
+    future retraining data. No retraining happens here or anywhere
+    automatically; this only persists the disagreement.
+    """
+    case = _get_case_or_404(session, case_id)
+
+    review = CaseReview(
+        case_id=case.id,
+        doctor_id=user.id,
+        agreed=payload.agreed,
+        system_verdict_label=case.verdict_label,
+        system_tumor_area_fraction=case.tumor_area_fraction,
+        comment=payload.comment,
+        corrected_verdict_label=payload.corrected_verdict_label if not payload.agreed else None,
+    )
+    session.add(review)
+    case.status = CaseStatus.CONFIRMED if payload.agreed else CaseStatus.REJECTED
     session.commit()
     return case_to_summary(case)
 

@@ -70,6 +70,11 @@ export function ReportPage() {
             <div style={{ fontSize: 11, color: "var(--hv-text-muted)" }}>
               Случай {caseDetail.id} · {new Date(caseDetail.created_at).toLocaleString("ru-RU")}
             </div>
+            {caseDetail.mask_source !== "model" && (
+              <div style={{ marginTop: 4, fontSize: 10.5, fontWeight: 700, color: "oklch(0.45 0.08 264)" }}>
+                Пример на эталонных данных BCSS — не вывод обученной модели
+              </div>
+            )}
           </div>
         </div>
 

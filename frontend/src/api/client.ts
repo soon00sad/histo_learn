@@ -1,6 +1,7 @@
 import type {
   AnalysisResult,
   CaseDetail,
+  CaseReviewInput,
   CaseSummary,
   IhcMarkersInput,
   JobAccepted,
@@ -101,22 +102,30 @@ export const api = {
 
   getJob: (jobId: string) => request<JobStatusOut>(`/jobs/${jobId}`),
 
-  listCases: (params?: { status?: string; verdict?: string; search?: string }) => {
+  listCases: (params?: { status?: string; verdict?: string; search?: string; sort?: "priority" | "date" }) => {
     const query = new URLSearchParams();
     if (params?.status) query.set("status", params.status);
     if (params?.verdict) query.set("verdict", params.verdict);
     if (params?.search) query.set("search", params.search);
+    if (params?.sort) query.set("sort", params.sort);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<CaseSummary[]>(`/cases${suffix}`);
   },
 
   getCase: (caseId: string) => request<CaseDetail>(`/cases/${caseId}`),
 
-  updateCaseStatus: (caseId: string, status: "pending" | "confirmed") =>
+  updateCaseStatus: (caseId: string, status: "pending" | "confirmed" | "rejected") =>
     request<CaseSummary>(`/cases/${caseId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
+    }),
+
+  reviewCase: (caseId: string, review: CaseReviewInput) =>
+    request<CaseSummary>(`/cases/${caseId}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(review),
     }),
 
   caseImageUrl: (caseId: string) => `${API_BASE}/cases/${caseId}/image`,

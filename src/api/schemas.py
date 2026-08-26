@@ -59,6 +59,7 @@ class CaseSummary(BaseModel):
     is_malignant: bool
     tumor_area_fraction: float
     status: str
+    mask_source: str  # "model" | "bcss_ground_truth" — see db.Case.mask_source
 
 
 class CaseDetail(CaseSummary):
@@ -73,7 +74,26 @@ class CaseDetail(CaseSummary):
 
 
 class CaseStatusUpdate(BaseModel):
-    status: str  # "pending" | "confirmed"
+    status: str  # "pending" | "confirmed" | "rejected"
+
+
+class CaseReviewRequest(BaseModel):
+    agreed: bool
+    comment: Optional[str] = None
+    # Only meaningful when agreed=False — what the doctor believes the
+    # verdict should have been. Free text (not constrained to the 16-class
+    # taxonomy): a reviewing pathologist may want to note something like
+    # "недостаточно ткани для оценки", not just pick a class.
+    corrected_verdict_label: Optional[str] = None
+
+
+class CaseReviewOut(BaseModel):
+    id: int
+    case_id: str
+    created_at: dt.datetime
+    agreed: bool
+    comment: Optional[str]
+    corrected_verdict_label: Optional[str]
 
 
 class JobStatusOut(BaseModel):
