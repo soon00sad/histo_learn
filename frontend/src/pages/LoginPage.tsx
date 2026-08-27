@@ -2,7 +2,15 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { Logo } from "../components/Logo";
+import { SparkIcon } from "../components/SparkIcon";
 import { ApiError } from "../api/client";
+import "./LoginPage.css";
+
+const FEATURES = [
+  { n: "01", title: "Попиксельная сегментация", body: "16 классов ткани молочной железы, а не просто «злокачественно / доброкачественно»." },
+  { n: "02", title: "PDF-заключение за секунды", body: "Маска, разбивка по классам и вердикт — готовы к печати сразу после анализа." },
+  { n: "03", title: "Полностью в контуре клиники", body: "Изображения препаратов не покидают локальную инфраструктуру." },
+];
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -45,7 +53,47 @@ export function LoginPage() {
       }}
     >
       <HeroDecoration />
-      <div style={{ position: "relative", width: "100%", maxWidth: 420 }}>
+      <div className="hv-login-shell" style={{ position: "relative" }}>
+        <div className="hv-login-hero">
+          <div className="hv-eyebrow" style={{ color: "var(--hv-accent-green)", marginBottom: 22 }}>
+            <span className="hv-eyebrow-dot" />
+            HistoVision · СППР
+          </div>
+          <h1
+            style={{
+              margin: 0, fontFamily: "var(--hv-font-display)", fontWeight: 700,
+              fontSize: 40, lineHeight: 1.1, letterSpacing: "-0.015em", color: "#fff", textWrap: "balance",
+            }}
+          >
+            Гистология молочной железы —{" "}
+            <span style={{ color: "var(--hv-accent-green)" }}>размечена по пикселю</span>.
+          </h1>
+          <p style={{ marginTop: 18, fontSize: 15, lineHeight: 1.6, color: "oklch(0.78 0.02 264)", maxWidth: 40 + "ch" }}>
+            Система поддержки принятия решений для патоморфологов: сегментация тканей, оценка доли опухоли и PDF-заключение — прямо на месте, без облака.
+          </p>
+
+          <div style={{ marginTop: 40, display: "flex", flexDirection: "column", gap: 20 }}>
+            {FEATURES.map((f, i) => (
+              <div
+                key={f.n}
+                style={{
+                  display: "flex", gap: 16, paddingLeft: 16,
+                  borderLeft: i === 0 ? "2px solid var(--hv-accent-green)" : "2px solid oklch(1 0 0 / 12%)",
+                }}
+              >
+                <span style={{ fontFamily: "var(--hv-font-display)", fontSize: 13, fontWeight: 700, color: i === 0 ? "var(--hv-accent-green)" : "oklch(0.5 0.02 264)", flex: "none", paddingTop: 1 }}>
+                  {f.n}
+                </span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: i === 0 ? "#fff" : "oklch(0.75 0.02 264)" }}>{f.title}</div>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "oklch(0.55 0.02 264)", marginTop: 3 }}>{f.body}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="hv-login-card-col">
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 36 }}>
           <Logo height={34} variant="white" />
         </div>
@@ -110,9 +158,11 @@ export function LoginPage() {
                 fontFamily: "var(--hv-font-display)",
                 boxShadow: "var(--hv-shadow-btn)",
                 opacity: isSubmitting ? 0.7 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               }}
             >
               {isSubmitting ? "Вход…" : "Войти"}
+              {!isSubmitting && <SparkIcon size={11} />}
             </button>
           </div>
 
@@ -151,6 +201,7 @@ export function LoginPage() {
         <div style={{ textAlign: "center", marginTop: 22, fontSize: 11.5, color: "oklch(0.55 0.02 264 / 80%)" }}>
           HistoVision · система поддержки принятия решений · v2.3.1
         </div>
+        </div>
       </div>
     </div>
   );
@@ -179,8 +230,25 @@ function HeroDecoration() {
         stroke="var(--hv-hero-line)"
         strokeWidth="1.5"
       />
+      <path
+        d="M 900 60 C 1040 140, 1180 120, 1260 220 S 1300 420, 1180 520"
+        fill="none"
+        stroke="var(--hv-hero-line)"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M 1000 700 C 1120 640, 1160 560, 1100 480 S 1180 320, 1080 220"
+        fill="none"
+        stroke="var(--hv-hero-line)"
+        strokeWidth="1"
+        opacity="0.7"
+      />
       <circle cx="320" cy="140" r="3" fill="var(--hv-accent-green)" opacity="0.6" />
       <circle cx="200" cy="400" r="3" fill="var(--hv-accent-teal)" opacity="0.5" />
+      <circle cx="1260" cy="220" r="3" fill="var(--hv-accent-green)" opacity="0.55" />
+      <circle cx="1100" cy="480" r="2.5" fill="var(--hv-accent-teal)" opacity="0.45" />
+      <circle cx="620" cy="200" r="2" fill="var(--hv-accent-green)" opacity="0.35" />
+      <circle cx="1180" cy="520" r="2" fill="var(--hv-accent-teal)" opacity="0.3" />
     </svg>
   );
 }

@@ -2,7 +2,7 @@
    (Claude Design MCP project). OKLCH is used natively — no hex conversion —
    since it's supported by all evergreen browsers this on-premise app targets. */
 :root {
-  --hv-font-display: "Sora", system-ui, sans-serif;
+  --hv-font-display: "Golos Text", system-ui, sans-serif;
   --hv-font-body: "Manrope", system-ui, sans-serif;
 
   --hv-bg: oklch(0.97 0.006 264);
@@ -27,6 +27,10 @@
   --hv-accent-teal: oklch(0.76 0.14 195);
   --hv-accent-green-soft: oklch(0.8 0.19 158 / 14%);
   --hv-accent-gradient: linear-gradient(120deg, oklch(0.8 0.19 158), oklch(0.76 0.14 195));
+  /* Darker/duller version of the same hue, for text set on light surfaces —
+     --hv-accent-green itself is too light/low-contrast for body-size text
+     on white. */
+  --hv-accent-teal-ink: oklch(0.5 0.13 165);
 
   --hv-malignant: oklch(0.55 0.2 27);
   --hv-malignant-soft: oklch(0.6 0.2 27 / 12%);
@@ -48,7 +52,32 @@
   --hv-radius-lg: 20px;
   --hv-radius-md: 12px;
   --hv-radius-sm: 8px;
-  --hv-radius-btn: 12px;
+  /* Squarer than the card radii on purpose — echoes the reference's
+     rectangular (not pill-shaped) buttons, a deliberate contrast against
+     the rounder cards/panels elsewhere. */
+  --hv-radius-btn: 10px;
+}
+
+/* Small uppercase, letter-spaced label used above a page/section heading —
+   the reference's recurring device ("KNOWLEDGE", "INNOVATION", nav labels)
+   for marking what a block of content is, reused here for real structural
+   context (product name, live counts, active mode) rather than decoration. */
+.hv-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--hv-accent-teal-ink);
+}
+.hv-eyebrow .hv-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hv-accent-green);
+  flex: none;
 }
 
 * {

@@ -4,6 +4,7 @@ import { TopBar } from "../components/TopBar";
 import { Disclaimer } from "../components/Disclaimer";
 import { SegmentationViewer } from "../components/SegmentationViewer";
 import { api, ApiError, fetchAuthenticatedBlobUrl } from "../api/client";
+import { SparkIcon } from "../components/SparkIcon";
 import type { AnalysisResult, IhcMarkersInput } from "../api/types";
 
 type Mode = "patch" | "wsi";
@@ -90,6 +91,10 @@ export function AnalysisPage() {
 
       <div style={{ padding: "36px 48px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
         <div>
+          <div className="hv-eyebrow" style={{ marginBottom: 8 }}>
+            <span className="hv-eyebrow-dot" />
+            {file ? (detectMode(file) === "patch" ? "Живой анализ" : "Полный препарат") : "Новый случай"}
+          </div>
           <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.1, fontFamily: "var(--hv-font-display)" }}>
             Анализ препарата
           </div>
@@ -144,9 +149,11 @@ export function AnalysisPage() {
                   color: "#fff", fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)",
                   boxShadow: "var(--hv-shadow-btn)",
                   opacity: file && !isSubmitting ? 1 : 0.55,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                 }}
               >
                 {isSubmitting ? "Анализируем…" : "Анализировать"}
+                {!isSubmitting && <SparkIcon size={11} />}
               </button>
             </div>
 
@@ -174,6 +181,7 @@ export function AnalysisPage() {
               }}
             >
               Сформировать PDF-отчёт
+              <SparkIcon size={11} />
             </button>
           </div>
         )}

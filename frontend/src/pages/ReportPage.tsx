@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Logo } from "../components/Logo";
 import { api, ApiError, fetchAuthenticatedBlobUrl, parseUtc } from "../api/client";
+import { SparkIcon } from "../components/SparkIcon";
 import type { CaseDetail } from "../api/types";
 
 export function ReportPage() {
@@ -61,9 +62,11 @@ export function ReportPage() {
             padding: "11px 20px", borderRadius: "var(--hv-radius-btn)", border: "none", cursor: isDownloading ? "default" : "pointer",
             background: "var(--hv-brand-gradient)", color: "#fff", fontWeight: 700, fontSize: 13.5,
             opacity: isDownloading ? 0.7 : 1,
+            display: "flex", alignItems: "center", gap: 8,
           }}
         >
           {isDownloading ? "Формируем PDF…" : "Скачать PDF"}
+          {!isDownloading && <SparkIcon size={10} />}
         </button>
       </div>
 

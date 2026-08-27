@@ -27,6 +27,14 @@ const STATUS_COLOR: Record<CaseSummary["status"], string> = {
   pending: "var(--hv-pending)",
   rejected: "var(--hv-malignant)",
 };
+function caseWord(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "случай";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "случая";
+  return "случаев";
+}
+
 const STATUS_DOT: Record<CaseSummary["status"], string> = {
   confirmed: "var(--hv-benign)",
   pending: "var(--hv-pending-dot)",
@@ -58,8 +66,14 @@ export function HistoryPage() {
       <TopBar active="history" />
 
       <div style={{ padding: "36px 48px 20px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 18 }}>
-        <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em", fontFamily: "var(--hv-font-display)" }}>
-          История случаев
+        <div>
+          <div className="hv-eyebrow" style={{ marginBottom: 8 }}>
+            <span className="hv-eyebrow-dot" />
+            {cases.length} {caseWord(cases.length)}
+          </div>
+          <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em", fontFamily: "var(--hv-font-display)" }}>
+            История случаев
+          </div>
         </div>
         <input
           type="text"
@@ -79,7 +93,7 @@ export function HistoryPage() {
               style={{
                 padding: "8px 15px", borderRadius: 9, whiteSpace: "nowrap", fontSize: 13, fontWeight: 700,
                 border: activeFilter === i ? "none" : "1px solid var(--hv-border)",
-                background: activeFilter === i ? "var(--hv-brand)" : "#fff",
+                background: activeFilter === i ? "var(--hv-text)" : "#fff",
                 color: activeFilter === i ? "#fff" : "oklch(0.4 0.02 264)",
                 cursor: "pointer",
               }}
@@ -97,8 +111,8 @@ export function HistoryPage() {
               style={{
                 padding: "6px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
                 border: sort === mode ? "none" : "1px solid var(--hv-border)",
-                background: sort === mode ? "oklch(0.4 0.02 264)" : "#fff",
-                color: sort === mode ? "#fff" : "oklch(0.4 0.02 264)",
+                background: sort === mode ? "var(--hv-accent-green)" : "#fff",
+                color: sort === mode ? "oklch(0.2 0.05 165)" : "oklch(0.4 0.02 264)",
               }}
             >
               {mode === "priority" ? "по приоритету" : "по дате"}

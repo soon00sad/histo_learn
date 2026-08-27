@@ -1,0 +1,41 @@
+/* Login hero: a two-column layout on wide viewports (bold headline + feature
+   list on the left, the login card on the right) collapsing to a single
+   centered column on narrow ones — inline styles can't express the media
+   query, hence this small stylesheet. */
+
+.hv-login-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.hv-login-hero {
+  display: none;
+}
+
+.hv-login-card-col {
+  width: 100%;
+}
+
+@media (min-width: 1040px) {
+  .hv-login-shell {
+    max-width: 1040px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 64px;
+  }
+  .hv-login-hero {
+    display: flex;
+    flex-direction: column;
+    max-width: 460px;
+    flex: none;
+  }
+  .hv-login-card-col {
+    flex: none;
+    width: 420px;
+  }
+}

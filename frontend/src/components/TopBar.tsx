@@ -16,14 +16,15 @@ export function TopBar({ active }: { active: "analysis" | "history" | "none" }) 
   const { user, logout } = useAuth();
 
   const tabStyle = (isActive: boolean): CSSProperties => ({
-    padding: "9px 16px",
-    borderRadius: 9,
-    fontSize: 14,
-    fontWeight: 600,
+    padding: "9px 14px",
+    fontSize: 12.5,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
     whiteSpace: "nowrap",
     textDecoration: "none",
-    background: isActive ? "var(--hv-brand-soft)" : "transparent",
-    color: isActive ? "var(--hv-brand-dark)" : "var(--hv-text-muted)",
+    borderBottom: isActive ? "2px solid var(--hv-accent-green)" : "2px solid transparent",
+    color: isActive ? "var(--hv-text)" : "var(--hv-text-muted)",
   });
 
   return (
@@ -83,8 +84,9 @@ export function TopBar({ active }: { active: "analysis" | "history" | "none" }) 
           onClick={logout}
           title="Выйти из системы"
           style={{
-            marginLeft: 4, padding: "8px 10px", borderRadius: 9, border: "1px solid var(--hv-border)",
-            background: "transparent", color: "var(--hv-text-muted)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            marginLeft: 4, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--hv-border)",
+            background: "transparent", color: "var(--hv-text-muted)", fontSize: 11.5, fontWeight: 700,
+            letterSpacing: "0.04em", textTransform: "uppercase", cursor: "pointer",
           }}
         >
           Выйти

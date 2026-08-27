@@ -4,7 +4,14 @@ import { TopBar } from "../components/TopBar";
 import { Disclaimer } from "../components/Disclaimer";
 import { SegmentationViewer } from "../components/SegmentationViewer";
 import { api, ApiError, fetchAuthenticatedBlobUrl, parseUtc } from "../api/client";
+import { SparkIcon } from "../components/SparkIcon";
 import type { CaseDetail } from "../api/types";
+
+const STATUS_EYEBROW: Record<CaseDetail["status"], string> = {
+  pending: "На рассмотрении",
+  confirmed: "Подтверждён врачом",
+  rejected: "Отклонён врачом",
+};
 
 export function CaseResultPage() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -88,6 +95,10 @@ export function CaseResultPage() {
 
       <div style={{ padding: "36px 48px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
         <div>
+          <div className="hv-eyebrow" style={{ marginBottom: 8 }}>
+            <span className="hv-eyebrow-dot" />
+            {STATUS_EYEBROW[caseDetail.status]}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.1, fontFamily: "var(--hv-font-display)" }}>
               Случай {caseDetail.id}
@@ -198,6 +209,7 @@ export function CaseResultPage() {
           }}
         >
           {caseDetail.report_available ? "Открыть PDF-отчёт" : "Сформировать PDF-отчёт"}
+          <SparkIcon size={11} />
         </button>
       </div>
 
