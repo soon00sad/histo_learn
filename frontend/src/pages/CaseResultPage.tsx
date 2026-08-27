@@ -109,7 +109,7 @@ export function CaseResultPage() {
             <span>{caseDetail.analysis_mode === "wsi" ? "Полный препарат" : "Живой анализ"}</span>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
           <div style={{ display: "flex", gap: 10 }}>
             {/* Review is a one-time decision (POST /cases/{id}/review 409s once
                 the case has left "pending") — both buttons lock together as
@@ -143,7 +143,14 @@ export function CaseResultPage() {
           </div>
 
           {showDisagreeForm && !isReviewed && (
-            <div style={{ width: 360, padding: 14, borderRadius: 12, background: "#fff", boxShadow: "var(--hv-shadow-card)", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div
+              style={{
+                position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20,
+                width: 360, padding: 14, borderRadius: 12, background: "#fff",
+                boxShadow: "0 16px 40px -12px oklch(0.2 0.05 268 / 35%)", border: "1px solid var(--hv-border)",
+                display: "flex", flexDirection: "column", gap: 8,
+              }}
+            >
               <textarea
                 value={disagreeComment}
                 onChange={(e) => setDisagreeComment(e.target.value)}

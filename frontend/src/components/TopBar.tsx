@@ -13,7 +13,7 @@ function initials(fullName: string): string {
 }
 
 export function TopBar({ active }: { active: "analysis" | "history" | "none" }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const tabStyle = (isActive: boolean): CSSProperties => ({
     padding: "9px 16px",
@@ -79,6 +79,16 @@ export function TopBar({ active }: { active: "analysis" | "history" | "none" }) 
           </div>
           <div style={{ fontSize: 11.5, color: "var(--hv-text-faint)", lineHeight: 1.25 }}>{user?.role}</div>
         </div>
+        <button
+          onClick={logout}
+          title="Выйти из системы"
+          style={{
+            marginLeft: 4, padding: "8px 10px", borderRadius: 9, border: "1px solid var(--hv-border)",
+            background: "transparent", color: "var(--hv-text-muted)", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+          }}
+        >
+          Выйти
+        </button>
       </div>
     </div>
   );

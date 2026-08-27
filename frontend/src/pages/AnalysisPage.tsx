@@ -10,12 +10,21 @@ type Mode = "patch" | "wsi";
 
 const TISSUE_TYPE = "Молочная железа, биопсия";
 const NOT_SPECIFIED = "Не указан";
+// Single upload accepts both plain images and whole-slide formats — which
+// pipeline handles a given file is detected from its extension, not chosen
+// by the user up front (there used to be a mode-toggle tab for this; it
+// only added a decision the user didn't need to make).
+const PATCH_EXTENSIONS = [".png", ".jpg", ".jpeg"];
+
+function detectMode(file: File): Mode {
+  const name = file.name.toLowerCase();
+  return PATCH_EXTENSIONS.some((ext) => name.endsWith(ext)) ? "patch" : "wsi";
+}
 
 export function AnalysisPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [mode, setMode] = useState<Mode>("patch");
   const [file, setFile] = useState<File | null>(null);
   const [ki67, setKi67] = useState(0);
   const [erStatus, setErStatus] = useState(NOT_SPECIFIED);
@@ -56,7 +65,7 @@ export function AnalysisPage() {
     setIsSubmitting(true);
     setError(null);
     try {
-      if (mode === "patch") {
+      if (detectMode(file) === "patch") {
         const analysis = await api.analyzePatch(file, TISSUE_TYPE, buildIhc());
         setResult(analysis);
       } else {
@@ -94,41 +103,17 @@ export function AnalysisPage() {
             </div>
           )}
         </div>
-
-        <div style={{ display: "flex", background: "oklch(0.94 0.008 264)", padding: 4, borderRadius: 12, gap: 2 }}>
-          {(["patch", "wsi"] as Mode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              disabled={Boolean(result) || isSubmitting}
-              style={{
-                padding: "9px 18px",
-                borderRadius: 9,
-                border: "none",
-                cursor: result ? "default" : "pointer",
-                background: mode === m ? "#fff" : "transparent",
-                color: mode === m ? "oklch(0.22 0.05 264)" : "var(--hv-text-muted)",
-                fontSize: 13.5,
-                fontWeight: mode === m ? 700 : 600,
-                whiteSpace: "nowrap",
-                boxShadow: mode === m ? "0 2px 8px -2px oklch(0.3 0.1 264 / 25%)" : "none",
-              }}
-            >
-              {m === "patch" ? "Живой анализ" : "Полный препарат"}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ padding: "28px 48px 16px", display: result ? "block" : "grid", gridTemplateColumns: result ? undefined : "1.05fr 0.85fr", gap: 28 }}>
         {!result ? (
           <>
             <div style={{ background: "#fff", borderRadius: "var(--hv-radius-lg)", padding: 24, boxShadow: "var(--hv-shadow-card)" }}>
-              <UploadRow file={file} onPick={() => fileInputRef.current?.click()} mode={mode} />
+              <UploadRow file={file} onPick={() => fileInputRef.current?.click()} />
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={mode === "patch" ? "image/png,image/jpeg" : ".svs,.tif,.tiff,.ndpi,.mrxs,.vms,.vmu,.scn"}
+                accept="image/png,image/jpeg,.png,.jpg,.jpeg,.svs,.tif,.tiff,.ndpi,.mrxs,.vms,.vmu,.scn"
                 style={{ display: "none" }}
                 onChange={(e) => {
                   setResult(null);
@@ -202,7 +187,7 @@ function Dot() {
   return <span style={{ width: 3, height: 3, borderRadius: "50%", background: "oklch(0.75 0.01 264)" }} />;
 }
 
-function UploadRow({ file, onPick, mode }: { file: File | null; onPick: () => void; mode: Mode }) {
+function UploadRow({ file, onPick }: { file: File | null; onPick: () => void }) {
   return (
     <div
       style={{
@@ -216,7 +201,7 @@ function UploadRow({ file, onPick, mode }: { file: File | null; onPick: () => vo
         </div>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {file ? file.name : mode === "patch" ? "Файл не выбран (PNG/JPEG)" : "Файл не выбран (SVS/TIFF/NDPI…)"}
+            {file ? file.name : "Файл не выбран (PNG/JPEG или SVS/TIFF/NDPI…)"}
           </div>
           {file && (
             <div style={{ fontSize: 11.5, color: "var(--hv-text-faint)" }}>{(file.size / 1e6).toFixed(1)} МБ</div>
