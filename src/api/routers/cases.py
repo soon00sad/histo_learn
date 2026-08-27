@@ -96,6 +96,11 @@ def review_case(
     automatically; this only persists the disagreement.
     """
     case = _get_case_or_404(session, case_id)
+    if case.status != CaseStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Случай уже рассмотрен — решение можно принять только один раз.",
+        )
 
     review = CaseReview(
         case_id=case.id,

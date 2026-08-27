@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { Logo } from "../components/Logo";
 import { ApiError } from "../api/client";
 
 export function LoginPage() {
@@ -42,11 +43,7 @@ export function LoginPage() {
     >
       <div style={{ width: "100%", maxWidth: 420 }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 36 }}>
-          <img
-            src="/logo.png"
-            alt="HistoVision"
-            style={{ height: 34, width: "auto", filter: "brightness(0) invert(1)", opacity: 0.94 }}
-          />
+          <Logo height={34} variant="white" />
         </div>
 
         <form

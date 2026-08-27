@@ -102,6 +102,13 @@ export function SegmentationViewer({
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (zoom <= 1) return;
+    // Without pointer capture, a fast real-mouse drag easily carries the
+    // cursor outside the (fairly small, fixed-height) viewer box mid-drag,
+    // which fires onPointerLeave and cancels the drag — panning then feels
+    // like it "doesn't work" even though the handlers are correct. Capture
+    // keeps move/up events targeted at this element regardless of where the
+    // cursor physically is until the button is actually released.
+    e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY, tx, ty };
     setDragging(true);
   };
@@ -111,8 +118,11 @@ export function SegmentationViewer({
     setTx(c.tx);
     setTy(c.ty);
   };
-  const onUp = () => {
+  const onUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current) {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
       dragRef.current = null;
       setDragging(false);
     }

@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, fetchAuthenticatedBlobUrl } from "../api/client";
+import { Logo } from "../components/Logo";
+import { api, ApiError, fetchAuthenticatedBlobUrl, parseUtc } from "../api/client";
 import type { CaseDetail } from "../api/types";
 
 export function ReportPage() {
   const { caseId } = useParams<{ caseId: string }>();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -16,7 +18,12 @@ export function ReportPage() {
       .getCase(caseId)
       .then(async (detail) => {
         setCaseDetail(detail);
-        setMaskUrl(await fetchAuthenticatedBlobUrl(api.caseMaskUrl(caseId)));
+        const [src, mask] = await Promise.all([
+          fetchAuthenticatedBlobUrl(api.caseImageUrl(caseId)),
+          fetchAuthenticatedBlobUrl(api.caseMaskUrl(caseId)),
+        ]);
+        setSourceUrl(src);
+        setMaskUrl(mask);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Не удалось загрузить случай"));
   }, [caseId]);
@@ -64,15 +71,18 @@ export function ReportPage() {
           for the authoritative PDF version generated server-side). */}
       <div style={{ maxWidth: 780, margin: "0 auto", background: "#fff", borderRadius: 7, boxShadow: "0 2px 10px rgba(20,20,19,0.12)", padding: "0.55in 0.6in" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid var(--hv-text)", paddingBottom: 14 }}>
-          <img src="/logo.png" alt="HistoVision" style={{ height: 26, width: "auto" }} />
+          <Logo height={26} />
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "var(--hv-font-display)" }}>Заключение по анализу препарата</div>
             <div style={{ fontSize: 11, color: "var(--hv-text-muted)" }}>
-              Случай {caseDetail.id} · {new Date(caseDetail.created_at).toLocaleString("ru-RU")}
+              Случай {caseDetail.id} · {parseUtc(caseDetail.created_at).toLocaleString("ru-RU")}
             </div>
             {caseDetail.mask_source !== "model" && (
-              <div style={{ marginTop: 4, fontSize: 10.5, fontWeight: 700, color: "oklch(0.45 0.08 264)" }}>
-                Пример на эталонных данных BCSS — не вывод обученной модели
+              <div
+                title="Демонстрация на эталонной маске BCSS (разметка патологов), не вывод обученной модели"
+                style={{ marginTop: 3, fontSize: 9, fontWeight: 500, color: "oklch(0.65 0.01 264)" }}
+              >
+                эталонные данные
               </div>
             )}
           </div>
@@ -82,7 +92,15 @@ export function ReportPage() {
           <div>
             <SectionLabel>Изображение препарата с маской сегментации</SectionLabel>
             <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", aspectRatio: "4/3.3", background: "#eee", border: "1px solid var(--hv-border)" }}>
-              {maskUrl && <img src={maskUrl} alt="Маска сегментации" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              {sourceUrl && (
+                <img src={sourceUrl} alt="Препарат" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+              )}
+              {maskUrl && (
+                <img
+                  src={maskUrl} alt="Маска сегментации"
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", mixBlendMode: "multiply", opacity: 0.55 }}
+                />
+              )}
             </div>
 
             <div style={{ marginTop: 16 }}>

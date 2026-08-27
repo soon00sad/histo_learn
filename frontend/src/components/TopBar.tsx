@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { Logo } from "./Logo";
 
 function initials(fullName: string): string {
   return fullName
@@ -42,7 +43,7 @@ export function TopBar({ active }: { active: "analysis" | "history" | "none" }) 
     >
       <div style={{ display: "flex", alignItems: "center", gap: 36 }}>
         <Link to="/analysis">
-          <img src="/logo.png" alt="HistoVision" style={{ height: 26, width: "auto", display: "block" }} />
+          <Logo height={26} />
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <Link to="/analysis" style={tabStyle(active === "analysis")}>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Logo } from "../components/Logo";
 import { api } from "../api/client";
 import type { JobStatusOut } from "../api/types";
 
@@ -59,7 +60,7 @@ export function ProcessingPage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--hv-bg)", fontFamily: "var(--hv-font-body)", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 48px", background: "#fff", borderBottom: "1px solid var(--hv-border)" }}>
-        <img src="/logo.png" alt="HistoVision" style={{ height: 24, width: "auto" }} />
+        <Logo height={24} />
       </div>
 
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>

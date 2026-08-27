@@ -19,6 +19,17 @@ from src.report.pdf_report import ReportClassArea, ReportData
 from src.utils.bcss_classes import BcssTaxonomy, load_bcss_classes
 from src.utils.config import Settings
 
+# Case.created_at and "generated at" are both stored/computed as naive UTC
+# (dt.datetime.utcnow()) — reports go to Russian clinicians, so render them
+# in Moscow time with an explicit label rather than an unlabeled timestamp
+# that's silently 3 hours off whatever the reader assumes it means.
+_MSK = dt.timezone(dt.timedelta(hours=3))
+
+
+def _format_msk(naive_utc: dt.datetime) -> str:
+    aware = naive_utc.replace(tzinfo=dt.timezone.utc).astimezone(_MSK)
+    return aware.strftime("%d.%m.%Y, %H:%M МСК")
+
 
 def class_areas_to_json(fractions: dict[str, float]) -> str:
     return json.dumps(fractions)
@@ -115,7 +126,7 @@ def build_report_data(case: Case, settings: Settings, doctor_name: str) -> Repor
 
     return ReportData(
         case_id=case.id,
-        created_at=case.created_at.strftime("%d.%m.%Y, %H:%M"),
+        created_at=_format_msk(case.created_at),
         tissue_type=case.tissue_type,
         source_filename=case.source_filename,
         analysis_mode="Полный препарат" if case.analysis_mode == "wsi" else "Живой анализ",
@@ -127,7 +138,7 @@ def build_report_data(case: Case, settings: Settings, doctor_name: str) -> Repor
         mask_image_path=settings.resolve_path(case.mask_image_path),
         disclaimer=settings.app.disclaimer,
         model_version=settings.app.version,
-        generated_at=dt.datetime.utcnow().strftime("%d.%m.%Y, %H:%M"),
+        generated_at=_format_msk(dt.datetime.utcnow()),
         doctor_name=doctor_name,
         logo_path=None,
         mask_source=case.mask_source,

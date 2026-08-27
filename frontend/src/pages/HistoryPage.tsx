@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { TopBar } from "../components/TopBar";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, parseUtc } from "../api/client";
 import type { CaseSummary } from "../api/types";
 
 type VerdictFilter = "all" | "malignant" | "benign";
@@ -135,7 +135,7 @@ export function HistoryPage() {
             >
               <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.id}</div>
               <div style={{ fontSize: 13, color: "oklch(0.45 0.02 264)" }}>
-                {new Date(c.created_at).toLocaleDateString("ru-RU")}
+                {parseUtc(c.created_at).toLocaleDateString("ru-RU")}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 <span
@@ -150,7 +150,7 @@ export function HistoryPage() {
                 {c.mask_source !== "model" && (
                   <span
                     title="Демонстрация на эталонной маске BCSS, не вывод обученной модели"
-                    style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "oklch(0.93 0.03 264)", color: "oklch(0.45 0.08 264)" }}
+                    style={{ padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, background: "oklch(0.95 0.01 264)", color: "oklch(0.6 0.02 264)" }}
                   >
                     эталон
                   </span>

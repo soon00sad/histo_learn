@@ -160,6 +160,49 @@ def test_case_status_update(tmp_path, settings, monkeypatch):
 
 
 def test_case_review_agree_confirms_and_disagree_rejects_with_a_record(tmp_path, settings, monkeypatch):
+    """Review is a one-time decision (see the next test), so agree/disagree
+    are exercised on two separate cases here rather than the same one."""
+    app, test_settings = _build_test_app(tmp_path, settings, monkeypatch)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_login(client, test_settings)}"}
+
+    def _new_case_id() -> str:
+        return client.post(
+            "/api/v1/analyze/patch",
+            files={"file": ("patch.png", _png_bytes(), "image/png")},
+            headers=headers,
+        ).json()["case_id"]
+
+    agree_case_id = _new_case_id()
+    agree_response = client.post(
+        f"/api/v1/cases/{agree_case_id}/review", json={"agreed": True}, headers=headers
+    )
+    assert agree_response.status_code == 200
+    assert agree_response.json()["status"] == "confirmed"
+
+    disagree_case_id = _new_case_id()
+    disagree_response = client.post(
+        f"/api/v1/cases/{disagree_case_id}/review",
+        json={"agreed": False, "comment": "Недостаточно ткани", "corrected_verdict_label": "Доброкачественная"},
+        headers=headers,
+    )
+    assert disagree_response.status_code == 200
+    assert disagree_response.json()["status"] == "rejected"
+
+    with db_module.session_scope() as session:
+        agree_review = session.query(db_module.CaseReview).filter_by(case_id=agree_case_id).one()
+        disagree_review = session.query(db_module.CaseReview).filter_by(case_id=disagree_case_id).one()
+    assert agree_review.agreed is True and agree_review.corrected_verdict_label is None
+    assert disagree_review.agreed is False
+    assert disagree_review.comment == "Недостаточно ткани"
+    assert disagree_review.corrected_verdict_label == "Доброкачественная"
+    assert disagree_review.system_verdict_label == disagree_response.json()["verdict_label"]
+
+
+def test_case_review_is_one_time_only(tmp_path, settings, monkeypatch):
+    """Once a case has been reviewed (agreed or disagreed), a second review
+    attempt must be rejected, not silently overwrite the first decision —
+    the doctor's call should be a single, final action."""
     app, test_settings = _build_test_app(tmp_path, settings, monkeypatch)
     client = TestClient(app)
     headers = {"Authorization": f"Bearer {_login(client, test_settings)}"}
@@ -170,29 +213,18 @@ def test_case_review_agree_confirms_and_disagree_rejects_with_a_record(tmp_path,
         headers=headers,
     ).json()["case_id"]
 
-    agree_response = client.post(
-        f"/api/v1/cases/{case_id}/review", json={"agreed": True}, headers=headers
-    )
-    assert agree_response.status_code == 200
-    assert agree_response.json()["status"] == "confirmed"
+    first = client.post(f"/api/v1/cases/{case_id}/review", json={"agreed": True}, headers=headers)
+    assert first.status_code == 200
 
-    disagree_response = client.post(
-        f"/api/v1/cases/{case_id}/review",
-        json={"agreed": False, "comment": "Недостаточно ткани", "corrected_verdict_label": "Доброкачественная"},
-        headers=headers,
-    )
-    assert disagree_response.status_code == 200
-    assert disagree_response.json()["status"] == "rejected"
+    second = client.post(f"/api/v1/cases/{case_id}/review", json={"agreed": False}, headers=headers)
+    assert second.status_code == 409
 
-    # Both reviews are kept (not overwritten) — see db.CaseReview's docstring.
+    # The original decision must be untouched, and only one review recorded.
+    detail = client.get(f"/api/v1/cases/{case_id}", headers=headers).json()
+    assert detail["status"] == "confirmed"
     with db_module.session_scope() as session:
-        reviews = session.query(db_module.CaseReview).filter_by(case_id=case_id).order_by(db_module.CaseReview.id).all()
-    assert len(reviews) == 2
-    assert reviews[0].agreed is True and reviews[0].corrected_verdict_label is None
-    assert reviews[1].agreed is False
-    assert reviews[1].comment == "Недостаточно ткани"
-    assert reviews[1].corrected_verdict_label == "Доброкачественная"
-    assert reviews[1].system_verdict_label == agree_response.json()["verdict_label"]
+        reviews = session.query(db_module.CaseReview).filter_by(case_id=case_id).all()
+    assert len(reviews) == 1
 
 
 def test_list_cases_default_priority_sort_ranks_malignant_first(tmp_path, settings, monkeypatch):
