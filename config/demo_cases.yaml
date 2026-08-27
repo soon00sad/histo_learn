@@ -8,14 +8,24 @@
 # hardcoded per-case in application code.
 #
 # bcss_row_id is the exact id from BCSS's own meta/roiBounds.csv (the ""
-# column) — see src/training/prepare_bcss.py's ROI_BOUNDS_CSV_URL. Chosen
-# from a 25-region scouting sample for combined class richness: together
-# these three cover tumor, stroma, necrosis, lymphocytic infiltrate, and
-# normal ducts/acini, not just tumor+stroma.
+# column) — see src/training/prepare_bcss.py's ROI_BOUNDS_CSV_URL. HV-DEMO-01
+# through 03 were chosen from a 45-region scouting sample for combined class
+# richness: together they cover tumor, stroma, necrosis, lymphocytic
+# infiltrate, and normal ducts/acini, not just tumor+stroma. HV-DEMO-04 is a
+# benign contrast case (see its own note below) — useful for checking the
+# case list's priority sort actually puts malignant cases above it.
 #
 # case_id uses an "HV-DEMO-NN" pattern (not the normal "HV-YYYY-NNNNN"
 # auto-generated scheme) so demo cases are visually distinguishable in the
 # case list by id alone, on top of the "reference data" badge.
+#
+# crop (optional) takes a square sub-region [x, y, size] (level-0 pixels,
+# top-left origin) of the downloaded BCSS region instead of the whole
+# thing — used for HV-DEMO-04: BCSS's own ROI-selection protocol targets
+# tumor-containing regions, so there is no naturally tumor-free (benign)
+# *region* anywhere in the dataset; this crops a real, verified tumor-free
+# sub-area (0% tumor/dcis by the same ground-truth mask) out of a region
+# that does contain tumor elsewhere, rather than fabricating one.
 
 cases:
   - case_id: "HV-DEMO-01"
@@ -39,3 +49,13 @@ cases:
     display_note: >
       Карцинома с сопоставимыми долями некроза и лимфоцитарной
       инфильтрации — хороший контраст с HV-DEMO-01 по составу.
+
+  - case_id: "HV-DEMO-04"
+    bcss_row_id: "TCGA-A7-A6VW-DX1"
+    crop: [2100, 2100, 900]
+    tissue_type: "Молочная железа, биопсия"
+    display_note: >
+      Доброкачественная фиброзно-жировая ткань (0% опухоли/DCIS по
+      эталонной разметке) — контрольный случай для проверки приоритетной
+      сортировки: должен показываться внизу списка, ниже всех
+      злокачественных случаев.

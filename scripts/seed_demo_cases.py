@@ -8,8 +8,11 @@ so the frontend and PDF report both show a "reference data" notice —
 never silently indistinguishable from a real model result.
 
 Which BCSS regions to use and their display metadata come from
-config/demo_cases.yaml, not this script — see that file for how the three
-regions were chosen.
+config/demo_cases.yaml, not this script — see that file for how the
+regions were chosen (including HV-DEMO-04's benign case, cropped from a
+tumor-free sub-area of an otherwise-malignant region — BCSS's own ROI
+protocol targets tumor-containing regions, so no whole region in the
+dataset is naturally tumor-free).
 
 Usage (run once per deployment; needs internet the first time, to fetch
 the BCSS regions themselves — safe to re-run afterwards without network,
@@ -102,6 +105,13 @@ def seed_demo_cases() -> None:
 
             image = Image.open(image_path).convert("RGB")
             raw_mask = np.array(Image.open(mask_path).convert("L"))
+
+            crop = entry.get("crop")
+            if crop:
+                cx, cy, csize = crop
+                image = image.crop((cx, cy, cx + csize, cy + csize))
+                raw_mask = raw_mask[cy:cy + csize, cx:cx + csize]
+
             remapped = remap_mask(raw_mask, taxonomy)  # raw BCSS codes -> 0-based model indices; outside_roi -> IGNORE_INDEX
             image, remapped = _resize_together(image, remapped, MAX_DIMENSION)
 
