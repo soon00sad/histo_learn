@@ -18,6 +18,16 @@
   --hv-brand-soft: oklch(0.5 0.22 296 / 10%);
   --hv-brand-gradient: linear-gradient(135deg, oklch(0.5 0.22 296), oklch(0.42 0.2 288));
 
+  /* Accent green/teal, inspired by the thinkbio.ai reference — purple stays
+     the primary brand identity; this is a secondary accent for decorative
+     moments (hero glows, highlight text, node/dot motifs) only. Kept at a
+     distinctly different hue from --hv-benign (a clinical status color, not
+     decorative) so the two are never visually interchangeable. */
+  --hv-accent-green: oklch(0.8 0.19 158);
+  --hv-accent-teal: oklch(0.76 0.14 195);
+  --hv-accent-green-soft: oklch(0.8 0.19 158 / 14%);
+  --hv-accent-gradient: linear-gradient(120deg, oklch(0.8 0.19 158), oklch(0.76 0.14 195));
+
   --hv-malignant: oklch(0.55 0.2 27);
   --hv-malignant-soft: oklch(0.6 0.2 27 / 12%);
   --hv-benign: oklch(0.5 0.15 150);
@@ -25,11 +35,20 @@
   --hv-pending: oklch(0.5 0.15 85);
   --hv-pending-dot: oklch(0.6 0.17 85);
 
+  /* Dark "hero" surface — used only where HistoVision already goes dark
+     (the login screen), not the clinical/light screens. */
+  --hv-hero-bg: linear-gradient(180deg, oklch(0.19 0.045 264) 0%, oklch(0.12 0.03 258) 100%);
+  --hv-hero-glow-brand: oklch(0.4 0.16 296 / 45%);
+  --hv-hero-glow-accent: oklch(0.55 0.14 165 / 30%);
+  --hv-hero-line: oklch(0.6 0.1 165 / 22%);
+
   --hv-shadow-card: 0 24px 60px -28px oklch(0.3 0.1 264 / 35%), 0 2px 8px -2px oklch(0.3 0.1 264 / 10%);
   --hv-shadow-topbar: 0 1px 0 oklch(0.9 0.006 264), 0 8px 24px -18px oklch(0.3 0.1 264 / 40%);
+  --hv-shadow-btn: 0 16px 32px -14px oklch(0.5 0.22 296 / 45%);
   --hv-radius-lg: 20px;
   --hv-radius-md: 12px;
   --hv-radius-sm: 8px;
+  --hv-radius-btn: 12px;
 }
 
 * {

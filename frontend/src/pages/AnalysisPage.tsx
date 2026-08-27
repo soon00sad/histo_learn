@@ -140,8 +140,9 @@ export function AnalysisPage() {
                 style={{
                   marginTop: 18, width: "100%", textAlign: "center", border: "none",
                   cursor: file && !isSubmitting ? "pointer" : "default",
-                  padding: "14px 22px", borderRadius: 13, background: "var(--hv-brand-gradient)",
+                  padding: "14px 22px", borderRadius: "var(--hv-radius-btn)", background: "var(--hv-brand-gradient)",
                   color: "#fff", fontSize: 14.5, fontWeight: 700, fontFamily: "var(--hv-font-display)",
+                  boxShadow: "var(--hv-shadow-btn)",
                   opacity: file && !isSubmitting ? 1 : 0.55,
                 }}
               >
@@ -167,9 +168,9 @@ export function AnalysisPage() {
               onClick={handleGenerateReport}
               style={{
                 alignSelf: "flex-start", textAlign: "center", border: "none", cursor: "pointer", padding: "14px 22px",
-                borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
+                borderRadius: "var(--hv-radius-btn)", background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
                 fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+                justifyContent: "center", gap: 8, boxShadow: "var(--hv-shadow-btn)",
               }}
             >
               Сформировать PDF-отчёт

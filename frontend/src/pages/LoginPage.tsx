@@ -31,17 +31,21 @@ export function LoginPage() {
   return (
     <div
       style={{
+        position: "relative",
         minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background:
-          "radial-gradient(circle at 25% 15%, oklch(0.28 0.06 280 / 60%) 0%, oklch(0 0 0 / 0%) 45%), linear-gradient(180deg, oklch(0.19 0.045 264) 0%, oklch(0.13 0.035 264) 100%)",
+        background: `radial-gradient(circle at 22% 12%, var(--hv-hero-glow-brand) 0%, oklch(0 0 0 / 0%) 42%),
+          radial-gradient(circle at 82% 88%, var(--hv-hero-glow-accent) 0%, oklch(0 0 0 / 0%) 40%),
+          var(--hv-hero-bg)`,
         fontFamily: "var(--hv-font-body)",
         padding: 24,
+        overflow: "hidden",
       }}
     >
-      <div style={{ width: "100%", maxWidth: 420 }}>
+      <HeroDecoration />
+      <div style={{ position: "relative", width: "100%", maxWidth: 420 }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 36 }}>
           <Logo height={34} variant="white" />
         </div>
@@ -98,13 +102,13 @@ export function LoginPage() {
                 border: "none",
                 cursor: isSubmitting ? "default" : "pointer",
                 padding: "14px 22px",
-                borderRadius: 12,
+                borderRadius: "var(--hv-radius-btn)",
                 background: "var(--hv-brand-gradient)",
                 color: "#fff",
                 fontSize: 14.5,
                 fontWeight: 700,
                 fontFamily: "var(--hv-font-display)",
-                boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+                boxShadow: "var(--hv-shadow-btn)",
                 opacity: isSubmitting ? 0.7 : 1,
               }}
             >
@@ -149,6 +153,35 @@ export function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Purely decorative background layer — thin curved outline paths, in the
+ * spirit of thinkbio.ai's hero line-art, rendered on our own accent-green
+ * token rather than any asset of theirs. Absolutely positioned, no pointer
+ * events, so it never interferes with the form. */
+function HeroDecoration() {
+  return (
+    <svg
+      aria-hidden="true"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <path
+        d="M -40 120 C 180 40, 260 40, 320 140 S 420 260, 620 200"
+        fill="none"
+        stroke="var(--hv-hero-line)"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M 60 620 C 220 560, 260 480, 200 400 S 300 260, 520 300"
+        fill="none"
+        stroke="var(--hv-hero-line)"
+        strokeWidth="1.5"
+      />
+      <circle cx="320" cy="140" r="3" fill="var(--hv-accent-green)" opacity="0.6" />
+      <circle cx="200" cy="400" r="3" fill="var(--hv-accent-teal)" opacity="0.5" />
+    </svg>
   );
 }
 

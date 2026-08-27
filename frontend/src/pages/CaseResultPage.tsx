@@ -192,9 +192,9 @@ export function CaseResultPage() {
           onClick={() => navigate(`/cases/${caseDetail.id}/report`)}
           style={{
             alignSelf: "flex-start", textAlign: "center", border: "none", cursor: "pointer", padding: "14px 22px",
-            borderRadius: 13, background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
+            borderRadius: "var(--hv-radius-btn)", background: "var(--hv-brand-gradient)", color: "#fff", fontSize: 14.5,
             fontWeight: 700, fontFamily: "var(--hv-font-display)", display: "flex", alignItems: "center",
-            justifyContent: "center", gap: 8, boxShadow: "0 16px 32px -14px oklch(0.5 0.22 296 / 55%)",
+            justifyContent: "center", gap: 8, boxShadow: "var(--hv-shadow-btn)",
           }}
         >
           {caseDetail.report_available ? "Открыть PDF-отчёт" : "Сформировать PDF-отчёт"}

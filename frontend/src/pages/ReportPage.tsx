@@ -58,7 +58,7 @@ export function ReportPage() {
           onClick={handleDownload}
           disabled={isDownloading}
           style={{
-            padding: "11px 20px", borderRadius: 10, border: "none", cursor: isDownloading ? "default" : "pointer",
+            padding: "11px 20px", borderRadius: "var(--hv-radius-btn)", border: "none", cursor: isDownloading ? "default" : "pointer",
             background: "var(--hv-brand-gradient)", color: "#fff", fontWeight: 700, fontSize: 13.5,
             opacity: isDownloading ? 0.7 : 1,
           }}
